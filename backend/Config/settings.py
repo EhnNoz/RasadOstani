@@ -22,7 +22,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-_fy7%g)dv11%d%p_w%h)_m0^y(1w#7q^u(4#o_^%-ne84thou^'
 
-# SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
 ALLOWED_HOSTS = ['*']
@@ -41,9 +40,11 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework.authtoken',
     'django_filters',
+    'corsheaders',  # اضافه کردن این خط
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',  # این خط باید بالاترین باشد
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -53,6 +54,41 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+# تنظیمات CORS
+CORS_ALLOW_ALL_ORIGINS = True  # برای محیط توسعه - در تولید محدود کنید
+
+# یا برای تنظیمات دقیق‌تر:
+# CORS_ALLOWED_ORIGINS = [
+#     "http://localhost:3000",  # React development server
+#     "http://127.0.0.1:3000",
+#     "http://localhost:8000",
+#     "http://127.0.0.1:8000",
+#     # آدرس‌های دیگر که نیاز دارید
+# ]
+
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+# برای اجازه دادن به کوکی‌ها و اعتبارسنجی
+CORS_ALLOW_CREDENTIALS = True
 
 ROOT_URLCONF = 'Config.urls'
 
@@ -78,7 +114,6 @@ SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(days=1),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
 }
-
 
 TEMPLATES = [
     {
