@@ -2,10 +2,13 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .views import PostViewSet, PlatformViewSet, ProvinceViewSet, UserProvinceAccessViewSet, ProvinceStatsViewSet, \
-    AdvancedAnalyticsViewSet, ChannelViewSet, PoliticalCategoryViewSet, UserCategoryViewSet
+    AdvancedAnalyticsViewSet, ChannelViewSet, PoliticalCategoryViewSet, UserCategoryViewSet, NewsTypeViewSet, \
+    NewsTopicViewSet
 
 router = DefaultRouter()
 router.register(r'platforms', PlatformViewSet, basename='platform')
+router.register(r'news-type', NewsTypeViewSet, basename='newstype')
+router.register(r'news-topic', NewsTopicViewSet, basename='newstopic')
 router.register(r'provinces', ProvinceViewSet, basename='province')
 router.register(r'user-province-access', UserProvinceAccessViewSet, basename='userprovinceaccess')
 router.register(r'posts', PostViewSet, basename='post')

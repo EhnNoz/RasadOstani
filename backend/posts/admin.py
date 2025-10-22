@@ -80,13 +80,13 @@ class ProvinceAdmin(admin.ModelAdmin):
 
 
 class NewsTypeAdmin(admin.ModelAdmin):
-    list_display = ['name', 'description']
+    list_display = ['name', 'news_type_query']
     search_fields = ['name']
     list_per_page = 20
 
 
 class NewsTopicAdmin(admin.ModelAdmin):
-    list_display = ['name', 'description']
+    list_display = ['name', 'news_topic_query']
     search_fields = ['name']
     list_per_page = 20
 

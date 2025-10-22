@@ -37,6 +37,7 @@ class Province(models.Model):
     name_fa = models.CharField(max_length=100, verbose_name=_("نام فارسی"))
     name_en = models.CharField(max_length=100, verbose_name=_("نام انگلیسی"))
     code = models.CharField(max_length=100, verbose_name=_("کد"))
+    province_query = models.TextField(blank=True, null=True, verbose_name=_("کوئری استان"))
 
     class Meta:
         verbose_name = _("استان")
@@ -61,7 +62,7 @@ class Platform(models.Model):
 # مدل برای نوع خبر
 class NewsType(models.Model):
     name = models.CharField(max_length=100, verbose_name=_("نام نوع خبر"))
-    description = models.TextField(blank=True, null=True, verbose_name=_("توضیحات"))
+    news_type_query = models.TextField(blank=True, null=True, verbose_name=_("توضیحات"))
 
     class Meta:
         verbose_name = _("نوع خبر")
@@ -74,7 +75,7 @@ class NewsType(models.Model):
 # مدل برای موضوع خبر
 class NewsTopic(models.Model):
     name = models.CharField(max_length=100, verbose_name=_("نام موضوع خبر"))
-    description = models.TextField(blank=True, null=True, verbose_name=_("توضیحات"))
+    news_topic_query = models.TextField(blank=True, null=True, verbose_name=_("توضیحات"))
 
     class Meta:
         verbose_name = _("موضوع خبر")
@@ -88,6 +89,7 @@ class Channel(models.Model):
     CHANNEL_TYPE_CHOICES = [
         ('political', 'جریان سیاسی'),
         ('user_group', 'گروه کاربری'),
+        ('no_type', 'فاقد نوع'),
     ]
 
     # اطلاعات پایه
@@ -150,14 +152,17 @@ class Post(models.Model):
     MEDIA_TYPE_CHOICES = [
         ('image', 'Image'),
         ('video', 'Video'),
-        ('carousel', 'Carousel'),
+        ('audio', 'Audio'),
         ('text', 'Text'),
+        ('document', 'Document'),
     ]
+
 
     SENTIMENT_CHOICES = [
         ('positive', 'Positive'),
         ('negative', 'Negative'),
         ('neutral', 'Neutral'),
+        ('notok', 'NotOK'),
     ]
 
     url = models.URLField(max_length=500, verbose_name=_("لینک پست"))

@@ -5,9 +5,10 @@ from rest_framework.permissions import IsAuthenticated
 from django.db.models import Count, Sum, Q
 from django.utils import timezone
 from datetime import timedelta, datetime, date
-from .models import Post, Platform, Province, UserProvinceAccess, Channel, UserCategory, PoliticalCategory
+from .models import Post, Platform, Province, UserProvinceAccess, Channel, UserCategory, PoliticalCategory, NewsType, \
+    NewsTopic
 from .serializers import PostSerializer, PlatformSerializer, ProvinceSerializer, UserProvinceAccessSerializer, \
-    ChannelSerializer, UserCategorySerializer, PoliticalCategorySerializer
+    ChannelSerializer, UserCategorySerializer, PoliticalCategorySerializer, NewsTypeSerializer, NewsTopicSerializer
 from .filters import PostFilter, ProvinceStatsFilter, ChannelFilter, ProvinceFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter
@@ -69,6 +70,113 @@ class PlatformViewSet(viewsets.ViewSet):
             platform.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
         except Platform.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+
+class NewsTypeViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request):
+        queryset = NewsType.objects.all()
+        serializer = NewsTypeSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        try:
+            newstype = NewsType.objects.get(pk=pk)
+            serializer = NewsTypeSerializer(newstype)
+            return Response(serializer.data)
+        except NewsType.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+    def create(self, request):
+        serializer = NewsTypeSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def update(self, request, pk=None):
+        try:
+            newstype = NewsType.objects.get(pk=pk)
+            serializer = NewsTypeSerializer(newstype, data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except NewsType.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+    def partial_update(self, request, pk=None):
+        try:
+            newstype = NewsType.objects.get(pk=pk)
+            serializer = NewsTypeSerializer(newstype, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except NewsType.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+    def destroy(self, request, pk=None):
+        try:
+            newstype = NewsType.objects.get(pk=pk)
+            newstype.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except NewsType.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+class NewsTopicViewSet(viewsets.ViewSet):
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request):
+        queryset = NewsTopic.objects.all()
+        serializer = NewsTopicSerializer(queryset, many=True)
+        return Response(serializer.data)
+
+    def retrieve(self, request, pk=None):
+        try:
+            newstopic = NewsTopic.objects.get(pk=pk)
+            serializer = NewsTopicSerializer(newstopic)
+            return Response(serializer.data)
+        except NewsType.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+    def create(self, request):
+        serializer = NewsTopicSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def update(self, request, pk=None):
+        try:
+            newstopic = NewsTopic.objects.get(pk=pk)
+            serializer = NewsTopicSerializer(newstopic, data=request.data)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except NewsTopic.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+    def partial_update(self, request, pk=None):
+        try:
+            newstopic = NewsTopic.objects.get(pk=pk)
+            serializer = NewsTopicSerializer(newstopic, data=request.data, partial=True)
+            if serializer.is_valid():
+                serializer.save()
+                return Response(serializer.data)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        except NewsTopic.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+    def destroy(self, request, pk=None):
+        try:
+            newstopic = NewsTopic.objects.get(pk=pk)
+            newstopic.delete()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except NewsTopic.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
 

@@ -1,12 +1,13 @@
 from rest_framework import serializers
-from .models import Post, Platform, Province, UserProvinceAccess, Channel, PoliticalCategory, UserCategory
+from .models import Post, Platform, Province, UserProvinceAccess, Channel, PoliticalCategory, UserCategory, NewsType, \
+    NewsTopic
 from django.contrib.auth.models import User
 
 
 class ProvinceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Province
-        fields = ['id', 'name_fa', 'name_en','code']
+        fields = ['id', 'name_fa', 'name_en','code','province_query']
 
 
 class PlatformSerializer(serializers.ModelSerializer):
@@ -14,6 +15,17 @@ class PlatformSerializer(serializers.ModelSerializer):
         model = Platform
         fields = ['id', 'name', 'description']
 
+
+class NewsTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NewsType
+        fields = '__all__'
+
+
+class NewsTopicSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = NewsTopic
+        fields = '__all__'
 
 class PoliticalCategorySerializer(serializers.ModelSerializer):
     class Meta:
