@@ -480,68 +480,68 @@ class PostViewSet(viewsets.ViewSet):
         ).order_by('date')
 
         # تبدیل تاریخ‌ها به شمسی و آماده‌سازی داده‌ها
-        categories = []
-        post_data = []
-        view_data = []
-        like_data = []
+        daily_categories = []
+        daily_post_data = []
+        daily_view_data = []
+        daily_like_data = []
 
         for item in daily_trend_qs:
-            gregorian_date = item['date']  # datetime.date
-            print(gregorian_date)
+            gregorian_date = item['date']
+
             # تبدیل به datetime.date اگر datetime.datetime بود
             if isinstance(gregorian_date, datetime):
                 gregorian_date = gregorian_date.date()
             elif isinstance(gregorian_date, str):
-                # اگر رشته بود، سعی در پارس کنیم
                 try:
                     from dateutil import parser
                     gregorian_date = parser.parse(gregorian_date).date()
                 except:
-                    continue  # یا خطای مناسب
+                    continue
             elif not isinstance(gregorian_date, date):
-                continue  # داده نامعتبر — ازش بگذر
+                continue
 
-            # حالا تبدیل به شمسی
+            # تبدیل به شمسی
             try:
                 jalali_date = jdatetime.date.fromgregorian(date=gregorian_date)
                 jalali_str = f"{jalali_date.year:04d}-{jalali_date.month:02d}-{jalali_date.day:02d}"
             except (ValueError, OverflowError) as e:
-                continue  # تاریخ خارج از محدوده معتبر (مثلاً قبل از 1600 میلادی)
+                continue
 
+            daily_categories.append(jalali_str)
+            daily_post_data.append(item['posts'])
+            daily_view_data.append(item['views'])
+            daily_like_data.append(item['likes'])
 
-            categories.append(jalali_str)
-            post_data.append(item['posts'])
-            view_data.append(item['views'])
-            like_data.append(item['likes'])
+        # ساخت ساختار نهایی برای نمودارها
+        daily_trend = {
+            "name": "روند روزانه پست‌ها",
+            "categories": daily_categories,
+            "data": daily_post_data,
+            "color": "#A281DD"
+        }
 
-        # ساخت ساختار نهایی برای نمودار
-        daily_trend = [
-            {
-                "name": "تعداد پست‌ها",
-                "categories": categories,
-                "data": post_data,
-                "color": "#b2532f"
-            },
-            {
-                "name": "تعداد بازدیدها",
-                "categories": categories,
-                "data": view_data,
-                "color": "#4CAF50"
-            },
-            {
-                "name": "تعداد لایک‌ها",
-                "categories": categories,
-                "data": like_data,
-                "color": "#2196F3"
-            }
-        ]
+        view_trend = {
+            "name": "روند بازدیدها",
+            "categories": daily_categories,
+            "data": daily_view_data,
+            "color": "#A281DD"
+        }
+
+        like_trend = {
+            "name": "روند لایک‌ها",
+            "categories": daily_categories,
+            "data": daily_like_data,
+            "color": "#A281DD"
+        }
 
         data = {
             'total_posts': total_posts,
             'unique_users': unique_users,
             'total_views': total_views,
             'total_likes': total_likes,
-            'daily_trend': daily_trend
+            'daily_trend': [daily_trend],
+            'view_trend': [view_trend],
+            'like_trend': [like_trend]
         }
 
         return Response(data)
@@ -591,7 +591,7 @@ class ProvinceStatsViewSet(viewsets.ViewSet):
 
         # تبدیل به فرمت مورد نظر
         data = [
-            [f"ir-{stat['province__code']}", stat['post_count']]
+            [f"{stat['province__name_en']}", stat['post_count']]
             for stat in province_stats
         ]
 
@@ -616,8 +616,8 @@ class ProvinceStatsViewSet(viewsets.ViewSet):
 def prepare_chart_data(queryset, value_field, name_field='username', colors=None):
     if colors is None:
         colors = [
-            "#fe7743", "#b2532f", "#9b4929", "#d98a5e", "#f0a582",
-            "#c16a43", "#a55a3a", "#e57e4d", "#ff8e5c", "#b85e38"
+            "#A281DD", "#FB7979", "#69AAD1", "#d98a5e", "#f0a582",
+            "#c16a43", "#a55a3a", "#e57e4d", "#A281DD", "#b85e38"
         ]
 
     categories = []
@@ -631,10 +631,12 @@ def prepare_chart_data(queryset, value_field, name_field='username', colors=None
         color = colors[idx % len(colors)]
         data.append({"y": value, "color": color})
 
-    return {
+    return [{
         "categories": categories,
         "data": data
-    }
+    }]
+
+
 
 
 def prepare_pie_series(data_list, name_field, count_field, colors=None):
@@ -643,8 +645,8 @@ def prepare_pie_series(data_list, name_field, count_field, colors=None):
     """
     if colors is None:
         colors = [
-            "#fe7743", "#b2532f", "#9b4929", "#d98a5e", "#f0a582",
-            "#c16a43", "#a55a3a", "#e57e4d", "#ff8e5c", "#b85e38"
+            "#69AAD1", "#A281DD", "#FB7979", "#d98a5e", "#f0a582",
+            "#c16a43", "#a55a3a", "#e57e4d", "#FB7979", "#b85e38"
         ]
 
     result = []
@@ -790,9 +792,10 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
         for stat in sentiment_stats:
             percentage = (stat['count'] / total_posts * 100) if total_posts > 0 else 0
             sentiment_data.append({
-                'sentiment': stat['sentiment'],
-                'count': stat['count'],
-                'percentage': round(percentage, 2)
+                'name': stat['sentiment'],
+                'y': stat['count'],
+                'percentage': round(percentage, 2),
+                "color": "#69AAD1"
             })
 
         # آمار NPO و EMO

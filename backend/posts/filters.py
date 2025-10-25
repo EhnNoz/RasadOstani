@@ -20,7 +20,8 @@ class PostFilter(django_filters.FilterSet):
     # فیلترهای چند انتخابی با فرمت CSV
     platform = NumberInFilter(field_name='platform__id', lookup_expr='in')
     platform_names = CharInFilter(field_name='platform__name', lookup_expr='in')
-    province = NumberInFilter(field_name='province__id', lookup_expr='in')
+    # province = NumberInFilter(field_name='province__id', lookup_expr='in')
+    province = django_filters.CharFilter(method='filter_province')
     channel = NumberInFilter(field_name='channel__id', lookup_expr='in')
 
     channel_type = django_filters.MultipleChoiceFilter(
@@ -56,6 +57,14 @@ class PostFilter(django_filters.FilterSet):
     # فیلترهای متنی برای جستجوی جزئی
     username = django_filters.CharFilter(field_name='username', lookup_expr='icontains')
     channel_name = django_filters.CharFilter(field_name='channel__name_fa', lookup_expr='icontains')
+
+    def filter_province(self, queryset, name, value):
+        # اگر عدد باشد (ID)
+        if value.isdigit():
+            return queryset.filter(province__id=value)
+        # اگر رشته باشد (name_en)
+        else:
+            return queryset.filter(province__name_en__iexact=value)
 
     class Meta:
         model = Post
@@ -110,7 +119,8 @@ class PostFilter(django_filters.FilterSet):
 class ProvinceStatsFilter(django_filters.FilterSet):
     # فیلترهای چند انتخابی با فرمت CSV
     platform = NumberInFilter(field_name='platform__id', lookup_expr='in')
-    province = NumberInFilter(field_name='province__id', lookup_expr='in')
+    # province = NumberInFilter(field_name='province__id', lookup_expr='in')
+    province = django_filters.CharFilter(method='filter_province')
     channel = NumberInFilter(field_name='channel__id', lookup_expr='in')
 
     channel_type = django_filters.MultipleChoiceFilter(
@@ -132,6 +142,14 @@ class ProvinceStatsFilter(django_filters.FilterSet):
     start_date = django_filters.CharFilter(method='filter_start_date')
     end_date = django_filters.CharFilter(method='filter_end_date')
     search = django_filters.CharFilter(method='filter_search')
+
+    def filter_province(self, queryset, name, value):
+        # اگر عدد باشد (ID)
+        if value.isdigit():
+            return queryset.filter(province__id=value)
+        # اگر رشته باشد (name_en)
+        else:
+            return queryset.filter(province__name_en__iexact=value)
 
     class Meta:
         model = Post
