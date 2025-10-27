@@ -590,12 +590,55 @@ class ProvinceStatsViewSet(viewsets.ViewSet):
         ).order_by('-post_count')
 
         # تبدیل به فرمت مورد نظر
-        data = [
-            [f"{stat['province__name_en']}", stat['post_count']]
-            for stat in province_stats
-        ]
+        # data = [
+        #     [f"{stat['province__name_en']}", stat['post_count']]
+        #     for stat in province_stats
+        # ]
 
-        return Response(data)
+        all_provinces = {
+            "ardabil": 0,
+            "isfahan": 0,
+            "alborz": 0,
+            "ilam": 0,
+            "eastAzerbaijan": 0,
+            "westAzerbaijan": 0,
+            "bushehr": 0,
+            "tehran": 0,
+            "chaharmahalandBakhtiari": 0,
+            "southKhorasan": 0,
+            "razaviKhorasan": 0,
+            "northKhorasan": 0,
+            "khuzestan": 0,
+            "zanjan": 0,
+            "semnan": 0,
+            "sistanAndBaluchestan": 0,
+            "fars": 0,
+            "qazvin": 0,
+            "qom": 0,
+            "kurdistan": 0,
+            "kerman": 0,
+            "kohgiluyehAndBoyerAhmad": 0,
+            "kermanshah": 0,
+            "golestan": 0,
+            "gilan": 0,
+            "lorestan": 0,
+            "mazandaran": 0,
+            "markazi": 0,
+            "hormozgan": 0,
+            "hamadan": 0,
+            "yazd": 0,
+        }
+
+        # به روزرسانی مقادیر
+        for stat in province_stats:
+            province_name = stat['province__name_en']
+            # تبدیل نام استان به فرمت camelCase اگر لازم است
+            if province_name in all_provinces:
+                all_provinces[province_name] = stat['post_count']
+
+        return Response(all_provinces)
+
+        # return Response(data)
 
 # class PoliticalCurrentViewSet(viewsets.ModelViewSet):
 #     queryset = PoliticalCurrent.objects.all()
@@ -682,20 +725,27 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
     def list(self, request):
         queryset = self._get_filtered_queryset(request)
 
-        # آمار کلی
+        # آمار کلی از داده‌های فیلتر شده کاربر
         total_posts = queryset.count()
         total_likes = queryset.aggregate(total=Coalesce(Sum('like_count'), 0))['total'] or 0
         total_views = queryset.aggregate(total=Coalesce(Sum('view_count'), 0))['total'] or 0
 
-        # محاسبه درصد نسبت به کل
-        all_posts_queryset = Post.objects.all()
-        all_posts_filter = PostFilter(request.query_params, queryset=all_posts_queryset)
-        all_posts_filtered = all_posts_filter.qs
+        # محاسبه درصد نسبت به کل داده‌های بدون فیلتر دسترسی کاربر
+        if request.user.is_superuser:
+            # برای سوپر یوزر، کل داده‌های سیستم
+            all_posts_count = Post.objects.all().count() or 1
+            all_likes = Post.objects.all().aggregate(total=Coalesce(Sum('like_count'), 0))['total'] or 1
+            all_views = Post.objects.all().aggregate(total=Coalesce(Sum('view_count'), 0))['total'] or 1
+        else:
+            # برای کاربران عادی، کل داده‌هایی که دسترسی دارند
+            user_provinces = UserProvinceAccess.objects.filter(user=request.user).values_list('province_id', flat=True)
+            all_user_posts = Post.objects.filter(province_id__in=user_provinces)
 
-        all_posts_count = all_posts_filtered.count() or 1
-        all_likes = all_posts_filtered.aggregate(total=Coalesce(Sum('like_count'), 0))['total'] or 1
-        all_views = all_posts_filtered.aggregate(total=Coalesce(Sum('view_count'), 0))['total'] or 1
+            all_posts_count = all_user_posts.count() or 1
+            all_likes = all_user_posts.aggregate(total=Coalesce(Sum('like_count'), 0))['total'] or 1
+            all_views = all_user_posts.aggregate(total=Coalesce(Sum('view_count'), 0))['total'] or 1
 
+        # محاسبه درصدها
         post_percentage = (total_posts / all_posts_count * 100) if all_posts_count > 0 else 0
         like_percentage = (total_likes / all_likes * 100) if all_likes > 0 else 0
         view_percentage = (total_views / all_views * 100) if all_views > 0 else 0
@@ -710,33 +760,87 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
         hashtag_counter = Counter(all_hashtags)
         top_hashtags = [{'name': tag, 'weight': count} for tag, count in hashtag_counter.most_common(30)]
 
-        # کاربران موثر و فعال
-        top_users_by_likes_qs = (queryset.values('username')
+        # کاربران موثر و فعال - بر اساس ترکیب کانال و پلتفرم
+        top_users_by_likes_qs = (queryset.exclude(channel__isnull=True)
+                                     .values('channel__name_fa', 'platform__name')  # تغییر به platform__name
                                      .annotate(total_likes=Sum('like_count'))
                                      .order_by('-total_likes')[:20])
-        top_users_by_likes = prepare_chart_data(top_users_by_likes_qs, 'total_likes')
 
-        top_users_by_views_qs = (queryset.values('username')
+        top_users_by_likes = []
+        categories_likes = []
+        data_likes = []
+        for user in top_users_by_likes_qs:
+            display_name = f"{user['channel__name_fa']} ({user['platform__name']})"  # استفاده از platform__name
+            categories_likes.append(display_name)
+            data_likes.append({
+                'y': user['total_likes'],
+                'color': '#A281DD'
+            })
+
+        if categories_likes and data_likes:
+            top_users_by_likes.append({
+                'categories': categories_likes,
+                'data': data_likes
+            })
+
+        top_users_by_views_qs = (queryset.exclude(channel__isnull=True)
+                                     .values('channel__name_fa', 'platform__name')  # تغییر به platform__name
                                      .annotate(total_views=Sum('view_count'))
                                      .order_by('-total_views')[:20])
-        top_users_by_views = prepare_chart_data(top_users_by_views_qs, 'total_views')
 
-        active_users_qs = (queryset.values('username')
+        top_users_by_views = []
+        categories_views = []
+        data_views = []
+        for user in top_users_by_views_qs:
+            display_name = f"{user['channel__name_fa']} ({user['platform__name']})"  # استفاده از platform__name
+            categories_views.append(display_name)
+            data_views.append({
+                'y': user['total_views'],
+                'color': '#A281DD'
+            })
+
+        if categories_views and data_views:
+            top_users_by_views.append({
+                'categories': categories_views,
+                'data': data_views
+            })
+
+        active_users_qs = (queryset.exclude(channel__isnull=True)
+                               .values('channel__name_fa', 'platform__name')  # تغییر به platform__name
                                .annotate(post_count=Count('id'))
                                .order_by('-post_count')[:20])
-        active_users = prepare_chart_data(active_users_qs, 'post_count')
 
-        # فعالترین کانال‌ها
+        active_users = []
+        categories_active = []
+        data_active = []
+        for user in active_users_qs:
+            display_name = f"{user['channel__name_fa']} ({user['platform__name']})"  # استفاده از platform__name
+            categories_active.append(display_name)
+            data_active.append({
+                'y': user['post_count'],
+                'color': '#A281DD'
+            })
+
+        if categories_active and data_active:
+            active_users.append({
+                'categories': categories_active,
+                'data': data_active
+            })
+
+        # فعالترین کانال‌ها - با پلتفرم
         active_channels_qs = (queryset.exclude(channel__isnull=True)
-                                  .values('channel__name_fa', 'channel__channel_type')
+                                  .values('channel__name_fa', 'platform__name')  # تغییر به platform__name
                                   .annotate(post_count=Count('id'))
                                   .order_by('-post_count')[:10])
 
-        active_channels = prepare_pie_series(
-            list(active_channels_qs),
-            name_field='channel__name_fa',
-            count_field='post_count'
-        )
+        active_channels = []
+        for channel in active_channels_qs:
+            display_name = f"{channel['channel__name_fa']} ({channel['platform__name']})"  # استفاده از platform__name
+            active_channels.append({
+                'name': display_name,
+                'y': channel['post_count'],
+                'color': '#69AAD1'
+            })
 
         # توزیع کانال‌ها بر اساس نوع
         channel_type_stats = (queryset.exclude(channel__isnull=True)
@@ -752,13 +856,13 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
 
         # فراوانی جریانات سیاسی (بر اساس تعداد پست)
         political_currents_stats = (queryset.exclude(channel__political_category__isnull=True)
-                                    .values('channel__political_category__name')
-                                    .annotate(
-                                        post_count=Count('id'),
-                                        total_likes=Sum('like_count'),
-                                        total_views=Sum('view_count')
-                                    )
-                                    .order_by('-post_count')[:15])
+                                        .values('channel__political_category__name')
+                                        .annotate(
+            post_count=Count('id'),
+            total_likes=Sum('like_count'),
+            total_views=Sum('view_count')
+        )
+                                        .order_by('-post_count')[:15])
 
         political_currents_distribution = prepare_pie_series(
             list(political_currents_stats),
@@ -768,13 +872,13 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
 
         # فراوانی گروه‌های کاربری (بر اساس تعداد پست)
         user_groups_stats = (queryset.exclude(channel__user_category__isnull=True)
-                             .values('channel__user_category__name')
-                             .annotate(
-                                 post_count=Count('id'),
-                                 total_likes=Sum('like_count'),
-                                 total_views=Sum('view_count')
-                             )
-                             .order_by('-post_count')[:15])
+                                 .values('channel__user_category__name')
+                                 .annotate(
+            post_count=Count('id'),
+            total_likes=Sum('like_count'),
+            total_views=Sum('view_count')
+        )
+                                 .order_by('-post_count')[:15])
 
         user_groups_distribution = prepare_pie_series(
             list(user_groups_stats),
@@ -814,7 +918,7 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
 
         # Heatmap موضوعات
         today = datetime.now().date()
-        dates_gregorian = [today - timedelta(days=i) for i in range(6, -1, -1)]
+        dates_gregorian = [today - timedelta(days=i) for i in range(13, -1, -1)]
 
         dates_categories = []
         for date in dates_gregorian:
@@ -864,7 +968,7 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
             },
             'series': [{
                 'name': 'تعداد پست‌ها',
-                'borderWidth': 1,
+                'borderWidth': 0.5,
                 'data': heatmap_data
             }]
         }

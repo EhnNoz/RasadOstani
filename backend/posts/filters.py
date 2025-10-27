@@ -76,7 +76,7 @@ class PostFilter(django_filters.FilterSet):
 
     def filter_start_date(self, queryset, name, value):
         try:
-            jd = jdatetime.strptime(value, '%Y/%m/%d')
+            jd = jdatetime.datetime.strptime(value, '%Y/%m/%d')
             md = jd.togregorian()
             return queryset.filter(datetime_create__gte=md)
         except ValueError:
@@ -84,7 +84,7 @@ class PostFilter(django_filters.FilterSet):
 
     def filter_end_date(self, queryset, name, value):
         try:
-            jd = jdatetime.strptime(value, '%Y/%m/%d')
+            jd = jdatetime.datetime.strptime(value, '%Y/%m/%d')
             md = jd.togregorian()
             md = md + timezone.timedelta(days=1)
             return queryset.filter(datetime_create__lte=md)
