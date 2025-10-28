@@ -13,9 +13,10 @@ from .filters import PostFilter, ProvinceStatsFilter, ChannelFilter, ProvinceFil
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter
 import jdatetime
+from jdatetime import date as jdate
 from django.db.models import Count, Sum, Avg, F, ExpressionWrapper, FloatField
 from django.db.models.functions import Coalesce
-from collections import Counter
+from collections import Counter, defaultdict
 import re
 
 
@@ -370,10 +371,8 @@ class PostViewSet(viewsets.ViewSet):
         serializer = PostSerializer(queryset, many=True)
         return Response(serializer.data)
 
-    # سایر متدها بدون تغییر باقی می‌مانند...
     def retrieve(self, request, pk=None):
         try:
-            # بررسی دسترسی کاربر به پست
             post = Post.objects.get(pk=pk)
             user = request.user
 
@@ -402,7 +401,6 @@ class PostViewSet(viewsets.ViewSet):
             post = Post.objects.get(pk=pk)
             user = request.user
 
-            # بررسی دسترسی
             if not user.is_superuser:
                 user_provinces = UserProvinceAccess.objects.filter(user=user).values_list('province_id', flat=True)
                 if post.province_id not in user_provinces:
@@ -424,7 +422,6 @@ class PostViewSet(viewsets.ViewSet):
             post = Post.objects.get(pk=pk)
             user = request.user
 
-            # بررسی دسترسی
             if not user.is_superuser:
                 user_provinces = UserProvinceAccess.objects.filter(user=user).values_list('province_id', flat=True)
                 if post.province_id not in user_provinces:
@@ -446,7 +443,6 @@ class PostViewSet(viewsets.ViewSet):
             post = Post.objects.get(pk=pk)
             user = request.user
 
-            # بررسی دسترسی
             if not user.is_superuser:
                 user_provinces = UserProvinceAccess.objects.filter(user=user).values_list('province_id', flat=True)
                 if post.province_id not in user_provinces:
@@ -488,7 +484,6 @@ class PostViewSet(viewsets.ViewSet):
         for item in daily_trend_qs:
             gregorian_date = item['date']
 
-            # تبدیل به datetime.date اگر datetime.datetime بود
             if isinstance(gregorian_date, datetime):
                 gregorian_date = gregorian_date.date()
             elif isinstance(gregorian_date, str):
@@ -500,11 +495,10 @@ class PostViewSet(viewsets.ViewSet):
             elif not isinstance(gregorian_date, date):
                 continue
 
-            # تبدیل به شمسی
             try:
-                jalali_date = jdatetime.date.fromgregorian(date=gregorian_date)
+                jalali_date = jdate.fromgregorian(date=gregorian_date)
                 jalali_str = f"{jalali_date.year:04d}-{jalali_date.month:02d}-{jalali_date.day:02d}"
-            except (ValueError, OverflowError) as e:
+            except (ValueError, OverflowError):
                 continue
 
             daily_categories.append(jalali_str)
@@ -534,6 +528,35 @@ class PostViewSet(viewsets.ViewSet):
             "color": "#A281DD"
         }
 
+        # --- استخراج 5 هشتگ برتر و استان‌های مرتبط ---
+        posts_with_hashtags = queryset.filter(
+            extracted_hashtag__isnull=False
+        ).exclude(
+            extracted_hashtag=''
+        ).select_related('province').values('extracted_hashtag', 'province__name_fa')
+
+        hashtag_provinces = defaultdict(set)
+        hashtag_counter = Counter()
+
+        for post in posts_with_hashtags:
+            hashtags_text = post['extracted_hashtag']
+            province_name = post['province__name_fa']
+            raw_tags = hashtags_text.split()
+            for tag in raw_tags:
+                clean_tag = re.sub(r'[^\w#آ-ی]', '', tag)
+                if clean_tag.startswith('#') and len(clean_tag) > 1:
+                    hashtag_provinces[clean_tag].add(province_name)
+                    hashtag_counter[clean_tag] += 1
+
+        top_5_hashtags = hashtag_counter.most_common(5)
+        top_hashtags_list = []
+        for hashtag, _ in top_5_hashtags:
+            top_hashtags_list.append({
+                "hashtag": hashtag,
+                "channel_categories": sorted(list(hashtag_provinces[hashtag]))
+            })
+
+        # ساخت داده‌های نهایی
         data = {
             'total_posts': total_posts,
             'unique_users': unique_users,
@@ -541,11 +564,11 @@ class PostViewSet(viewsets.ViewSet):
             'total_likes': total_likes,
             'daily_trend': [daily_trend],
             'view_trend': [view_trend],
-            'like_trend': [like_trend]
+            'like_trend': [like_trend],
+            'top_hashtags': top_hashtags_list  # ✅ اضافه شده
         }
 
         return Response(data)
-
 
 class ProvinceStatsViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]

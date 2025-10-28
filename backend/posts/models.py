@@ -280,3 +280,168 @@ class UserProvinceAccess(models.Model):
         return f"{self.user.username} - {self.province.name_fa}"
 
 
+class Profile(models.Model):
+    # فیلدهای اصلی پروفایل
+    name = models.CharField(max_length=255, verbose_name=_("نام اصلی"))
+    position = models.CharField(max_length=255, blank=True, null=True, verbose_name=_("سمت"))
+    category = models.CharField(max_length=255, blank=True, null=True, verbose_name=_("دسته"))
+    photo = models.ImageField(upload_to='profiles/', blank=True, null=True, verbose_name=_("عکس"))
+    province = models.ForeignKey('Province', on_delete=models.CASCADE, verbose_name=_("استان"))
+
+    # فیلدهای زمانی
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("تاریخ ایجاد"))
+    updated_at = models.DateTimeField(auto_now=True, verbose_name=_("تاریخ بروزرسانی"))
+
+    class Meta:
+        verbose_name = _("پروفایل")
+        verbose_name_plural = _("پروفایل‌ها")
+        indexes = [
+            models.Index(fields=['name']),
+            models.Index(fields=['category']),
+            models.Index(fields=['position']),
+            models.Index(fields=['province']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} - {self.position} - {self.province}"
+
+
+class Celebrity(models.Model):
+    # فیلد کلید خارجی به پروفایل
+    profile = models.ForeignKey(
+        Profile,
+        on_delete=models.CASCADE,
+        verbose_name=_("پروفایل"),
+        related_name='celebrities'
+    )
+
+    # فیلدهای کلید خارجی
+    platform = models.ForeignKey('Platform', on_delete=models.CASCADE, verbose_name=_("پلتفرم"))
+
+    # فیلدهای شناسه و آمار
+    original_id = models.CharField(max_length=100, unique=True, verbose_name=_("آیدی"))
+    member_count = models.IntegerField(default=0, verbose_name=_("تعداد اعضا"))
+
+    # فیلدهای زمانی
+    update_date = models.DateTimeField(auto_now=True, verbose_name=_("تاریخ آپدیت"))
+    join_date = models.DateTimeField(verbose_name=_("تاریخ پیوستن"))
+
+    class Meta:
+        verbose_name = _("چهره")
+        verbose_name_plural = _("چهره‌ها")
+        indexes = [
+            models.Index(fields=['platform']),
+            models.Index(fields=['original_id']),
+            models.Index(fields=['profile']),
+        ]
+
+    def __str__(self):
+        return f"{self.profile.name} - {self.profile.position} - {self.platform}"
+
+class CelebrityPost(models.Model):
+    MEDIA_TYPE_CHOICES = [
+        ('image', 'Image'),
+        ('video', 'Video'),
+        ('audio', 'Audio'),
+        ('text', 'Text'),
+        ('document', 'Document'),
+    ]
+
+    SENTIMENT_CHOICES = [
+        ('positive', 'Positive'),
+        ('negative', 'Negative'),
+        ('neutral', 'Neutral'),
+        ('notok', 'NotOK'),
+    ]
+
+    # ارتباط با مدل چهره
+    celebrity = models.ForeignKey(
+        Celebrity,
+        on_delete=models.CASCADE,
+        verbose_name=_("نام چهره"),
+        related_name='posts'
+    )
+
+    # فیلدهای اصلی پست
+    url = models.URLField(max_length=500, verbose_name=_("لینک پست"))
+    lang_post = models.CharField(max_length=10, verbose_name=_("زبان پست"))
+    like_count = models.IntegerField(default=0, verbose_name=_("تعداد لایک"))
+    media_type = models.CharField(max_length=10, choices=MEDIA_TYPE_CHOICES, verbose_name=_("نوع مدیا"))
+    description = models.TextField(blank=True, null=True, verbose_name=_("توضیحات"))
+    comment_count = models.IntegerField(default=0, verbose_name=_("تعداد کامنت"))
+    # username = models.CharField(max_length=100, verbose_name=_("نام کاربری"))
+    extracted_hashtag = models.TextField(blank=True, null=True, verbose_name=_("هشتگ‌های استخراج شده"))
+    sentiment = models.CharField(max_length=10, choices=SENTIMENT_CHOICES, verbose_name=_("احساس"))
+    npo = models.BooleanField(default=False, verbose_name=_("NPO"))
+    emo = models.BooleanField(default=False, verbose_name=_("EMO"))
+
+    # فیلدهای کلید خارجی
+    platform = models.ForeignKey('Platform', on_delete=models.CASCADE, verbose_name=_("پلتفرم"))
+    province = models.ForeignKey('Province', on_delete=models.CASCADE, verbose_name=_("استان"))
+
+    # فیلدهای متنی اضافی
+    tag = models.TextField(blank=True, null=True, verbose_name=_("تگ"))
+    extracted_mention = models.TextField(blank=True, null=True, verbose_name=_("منشن‌های استخراج شده"))
+    reply_text = models.TextField(blank=True, null=True, verbose_name=_("متن پاسخ"))
+    reply_username = models.CharField(max_length=100, blank=True, null=True, verbose_name=_("نام کاربری پاسخ دهنده"))
+
+    # فیلدهای زمانی
+    datetime_create = models.DateTimeField(verbose_name=_("تاریخ ایجاد"))
+    datetime_robot = models.DateTimeField(auto_now_add=True, verbose_name=_("تاریخ ربات"))
+
+    # فیلدهای آماری
+    view_count = models.IntegerField(default=0, verbose_name=_("تعداد بازدید"))
+    copy_count = models.IntegerField(default=0, verbose_name=_("تعداد کپی"))
+
+    # فیلدهای کلید خارجی اختیاری
+    # channel = models.ForeignKey(
+    #     'Channel',
+    #     on_delete=models.SET_NULL,
+    #     verbose_name=_("کانال"),
+    #     null=True,
+    #     blank=True
+    # )
+
+    news_type = models.ForeignKey(
+        'NewsType',
+        on_delete=models.SET_NULL,
+        verbose_name=_("نوع خبر"),
+        null=True,
+        blank=True
+    )
+
+    news_topic = models.ForeignKey(
+        'NewsTopic',
+        on_delete=models.SET_NULL,
+        verbose_name=_("موضوع خبر"),
+        null=True,
+        blank=True
+    )
+
+    # tv_program = models.ForeignKey(
+    #     'TvProgram',
+    #     on_delete=models.SET_NULL,
+    #     verbose_name=_("نام برنامه"),
+    #     null=True,
+    #     blank=True
+    # )
+
+    class Meta:
+        verbose_name = _("پست چهره")
+        verbose_name_plural = _("پست‌های چهره")
+        indexes = [
+            # models.Index(fields=['username']),
+            models.Index(fields=['datetime_create']),
+            models.Index(fields=['province']),
+            models.Index(fields=['platform']),
+            # models.Index(fields=['channel']),
+            models.Index(fields=['news_type']),
+            models.Index(fields=['news_topic']),
+            models.Index(fields=['celebrity']),
+            models.Index(fields=['sentiment']),
+        ]
+
+    def __str__(self):
+        return f"{self.datetime_create} - {self.celebrity.profile.name}"
+
+
