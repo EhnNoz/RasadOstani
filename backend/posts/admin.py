@@ -4,7 +4,7 @@ from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
 from .models import (
     Channel, Platform, Province, NewsType, NewsTopic,
-    Post, UserProvinceAccess, PoliticalCategory, UserCategory
+    Post, UserProvinceAccess, PoliticalCategory, UserCategory, TvProgram
 )
 
 
@@ -91,6 +91,12 @@ class NewsTopicAdmin(admin.ModelAdmin):
     list_per_page = 20
 
 
+class TvProgramAdmin(admin.ModelAdmin):
+    list_display = ['name', 'province', 'tv_program_query']
+    search_fields = ['name']
+    list_per_page = 20
+
+
 class PostAdmin(admin.ModelAdmin):
     list_display = [
         'username', 'platform', 'province', 'channel',
@@ -131,7 +137,7 @@ class PostAdmin(admin.ModelAdmin):
         ('تحلیل و طبقه‌بندی', {
             'fields': (
                 'sentiment', 'npo', 'emo', 'news_type',
-                'news_topic'
+                'news_topic','tv_program'
             )
         }),
         ('متادیتا', {
@@ -187,3 +193,4 @@ admin.site.register(NewsType, NewsTypeAdmin)
 admin.site.register(NewsTopic, NewsTopicAdmin)
 admin.site.register(Post, PostAdmin)
 admin.site.register(UserProvinceAccess, UserProvinceAccessAdmin)
+admin.site.register(TvProgram, TvProgramAdmin)

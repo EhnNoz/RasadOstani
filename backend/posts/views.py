@@ -973,6 +973,50 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
             }]
         }
 
+        # فعالترین برنامه‌ها - بر اساس تعداد پست
+        active_tv_programs_qs = (queryset.exclude(tv_program__isnull=True)
+                                     .values('tv_program__name')
+                                     .annotate(post_count=Count('id'))
+                                     .order_by('-post_count')[:10])
+
+        active_tv_programs = []
+        categories_programs_posts = []
+        data_programs_posts = []
+        for program in active_tv_programs_qs:
+            categories_programs_posts.append(program['tv_program__name'])
+            data_programs_posts.append({
+                'y': program['post_count'],
+                'color': '#A281DD'
+            })
+
+        if categories_programs_posts and data_programs_posts:
+            active_tv_programs.append({
+                'categories': categories_programs_posts,
+                'data': data_programs_posts
+            })
+
+        # پربازدیدترین برنامه‌ها - بر اساس مجموع بازدید
+        top_viewed_tv_programs_qs = (queryset.exclude(tv_program__isnull=True)
+                                         .values('tv_program__name')
+                                         .annotate(total_views=Sum('view_count'))
+                                         .order_by('-total_views')[:10])
+
+        top_viewed_tv_programs = []
+        categories_programs_views = []
+        data_programs_views = []
+        for program in top_viewed_tv_programs_qs:
+            categories_programs_views.append(program['tv_program__name'])
+            data_programs_views.append({
+                'y': program['total_views'],
+                'color': '#A281DD'
+            })
+
+        if categories_programs_views and data_programs_views:
+            top_viewed_tv_programs.append({
+                'categories': categories_programs_views,
+                'data': data_programs_views
+            })
+
         data = {
             'overall_stats': {
                 'total_posts': total_posts,
@@ -993,7 +1037,9 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
             'sentiment_distribution': sentiment_data,
             'npo_stats': npo_stats,
             'emo_stats': emo_stats,
-            'topics_heatmap': topics_heatmap
+            'topics_heatmap': topics_heatmap,
+            'active_tv_programs': active_tv_programs,
+            'top_viewed_tv_programs': top_viewed_tv_programs,
         }
 
         return Response(data)

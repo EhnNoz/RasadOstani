@@ -85,6 +85,19 @@ class NewsTopic(models.Model):
         return self.name
 
 
+class TvProgram(models.Model):
+    name = models.CharField(max_length=100, verbose_name=_("نام برنامه"))
+    province = models.ForeignKey(Province, on_delete=models.CASCADE, verbose_name=_("استان"))
+    tv_program_query = models.TextField(blank=True, null=True, verbose_name=_("توضیحات"))
+
+    class Meta:
+        verbose_name = _("نام برنامه")
+        verbose_name_plural = _("نام برنامه ها")
+
+    def __str__(self):
+        return self.name
+
+
 class Channel(models.Model):
     CHANNEL_TYPE_CHOICES = [
         ('political', 'جریان سیاسی'),
@@ -224,6 +237,14 @@ class Post(models.Model):
         'NewsTopic',  # نام اپ و مدل
         on_delete=models.SET_NULL,
         verbose_name=_("موضوع خبر"),
+        null=True,
+        blank=True
+    )
+
+    tv_program = models.ForeignKey(
+        'TvProgram',  # نام اپ و مدل
+        on_delete=models.SET_NULL,
+        verbose_name=_("نام برنامه"),
         null=True,
         blank=True
     )

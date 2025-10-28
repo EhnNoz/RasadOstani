@@ -53,6 +53,7 @@ class PostSerializer(serializers.ModelSerializer):
 
     news_type_name = serializers.CharField(source='news_type.name', read_only=True)
     news_topic_name = serializers.CharField(source='news_topic.name', read_only=True)
+    tv_program = serializers.CharField(read_only=True)
 
     class Meta:
         model = Post
