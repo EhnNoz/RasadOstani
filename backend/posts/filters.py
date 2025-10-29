@@ -4,7 +4,7 @@ from django.db.models import Q
 import jdatetime
 from datetime import datetime, timedelta
 from django.utils import timezone
-from .models import Post, Channel, Province, UserCategory, NewsType, NewsTopic, PoliticalCategory, Platform
+from .models import Post, Channel, Province, UserCategory, NewsType, NewsTopic, PoliticalCategory, Platform, Profile
 from django_filters.rest_framework import BaseInFilter, NumberFilter, CharFilter
 
 
@@ -272,3 +272,20 @@ class ProvinceFilter(django_filters.FilterSet):
             Q(name_fa__icontains=value) |
             Q(name_en__icontains=value)
         )
+
+
+class ProfileFilter(django_filters.FilterSet):
+    province = django_filters.CharFilter(method='filter_province')
+    name = django_filters.CharFilter(lookup_expr='icontains')
+    position = django_filters.CharFilter(lookup_expr='icontains')
+    category = django_filters.CharFilter(lookup_expr='icontains')
+
+    class Meta:
+        model = Profile
+        fields = ['name', 'position', 'category']
+
+    def filter_province(self, queryset, name, value):
+        if value.isdigit():
+            return queryset.filter(province__id=value)
+        else:
+            return queryset.filter(province__name_en__iexact=value)

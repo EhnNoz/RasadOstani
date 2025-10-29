@@ -1,7 +1,8 @@
 from rest_framework import serializers
 from .models import Post, Platform, Province, UserProvinceAccess, Channel, PoliticalCategory, UserCategory, NewsType, \
-    NewsTopic
+    NewsTopic, CelebrityPost, Celebrity, Profile
 from django.contrib.auth.models import User
+from django.utils.translation import gettext_lazy as _
 
 
 class ProvinceSerializer(serializers.ModelSerializer):
@@ -138,3 +139,36 @@ class PostSerializer(serializers.ModelSerializer):
             return obj.channel.get_main_category()
         return None
 
+
+class ProfileListSerializer(serializers.ModelSerializer):
+    province_name = serializers.CharField(source='province.name_fa', read_only=True)
+    class Meta:
+        model = Profile
+        fields = ['name', 'position', 'category', 'province_name']
+
+
+class CelebrityPostSerializer(serializers.ModelSerializer):
+    platform_name = serializers.CharField(source='platform.name', read_only=True)
+    province_name = serializers.CharField(source='province.name_fa', read_only=True)
+
+    class Meta:
+        model = CelebrityPost
+        fields = '__all__'
+
+
+class ProfileWithLatestPostsSerializer(serializers.ModelSerializer):
+    latest_posts = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Profile
+        fields = ['name', 'position', 'category', 'latest_posts']
+
+    def get_latest_posts(self, obj):
+        # برای هر پلتفرم 5 پست آخر
+        posts_by_platform = {}
+        celebrities = obj.celebrities.all()
+        for celeb in celebrities:
+            posts = celeb.posts.order_by('-datetime_create')[:5]
+            platform_name = celeb.platform.name
+            posts_by_platform[platform_name] = CelebrityPostSerializer(posts, many=True).data
+        return posts_by_platform

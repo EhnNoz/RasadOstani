@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from .views import PostViewSet, PlatformViewSet, ProvinceViewSet, UserProvinceAccessViewSet, ProvinceStatsViewSet, \
     AdvancedAnalyticsViewSet, ChannelViewSet, PoliticalCategoryViewSet, UserCategoryViewSet, NewsTypeViewSet, \
-    NewsTopicViewSet
+    NewsTopicViewSet, ProfileListViewSet, ProfileLatestPostsViewSet
 
 router = DefaultRouter()
 router.register(r'platforms', PlatformViewSet, basename='platform')
@@ -17,7 +17,8 @@ router.register(r'channels', ChannelViewSet, basename='channel')
 router.register(r'political-categories', PoliticalCategoryViewSet, basename='politicalcategory')
 router.register(r'user-categories', UserCategoryViewSet, basename='usercategory')
 router.register(r'advanced-analytics', AdvancedAnalyticsViewSet, basename='advancedanalytics')
-
+router.register(r'profiles', ProfileListViewSet, basename='profile-list')
+router.register(r'profiles-with-posts', ProfileLatestPostsViewSet, basename='profile-with-posts')
 
 urlpatterns = [
     path('', include(router.urls)),

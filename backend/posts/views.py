@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -6,10 +6,11 @@ from django.db.models import Count, Sum, Q
 from django.utils import timezone
 from datetime import timedelta, datetime, date
 from .models import Post, Platform, Province, UserProvinceAccess, Channel, UserCategory, PoliticalCategory, NewsType, \
-    NewsTopic
+    NewsTopic, Profile
 from .serializers import PostSerializer, PlatformSerializer, ProvinceSerializer, UserProvinceAccessSerializer, \
-    ChannelSerializer, UserCategorySerializer, PoliticalCategorySerializer, NewsTypeSerializer, NewsTopicSerializer
-from .filters import PostFilter, ProvinceStatsFilter, ChannelFilter, ProvinceFilter
+    ChannelSerializer, UserCategorySerializer, PoliticalCategorySerializer, NewsTypeSerializer, NewsTopicSerializer, \
+    ProfileWithLatestPostsSerializer, ProfileListSerializer
+from .filters import PostFilter, ProvinceStatsFilter, ChannelFilter, ProvinceFilter, ProfileFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter
 import jdatetime
@@ -1066,3 +1067,58 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
         }
 
         return Response(data)
+
+
+class IsSuperUserOrProvinceAccess(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return request.user.is_authenticated
+
+    def has_object_permission(self, request, view, obj):
+        if request.user.is_superuser:
+            return True
+        user_provinces = UserProvinceAccess.objects.filter(user=request.user).values_list('province_id', flat=True)
+        return obj.province_id in user_provinces
+
+
+class ProfileListViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = ProfileListSerializer
+    permission_classes = [IsSuperUserOrProvinceAccess]
+    filterset_class = ProfileFilter
+    ordering_fields = ['name', 'created_at']
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_superuser:
+            return Profile.objects.all()
+        user_provinces = UserProvinceAccess.objects.filter(user=user).values_list('province_id', flat=True)
+        return Profile.objects.filter(province_id__in=user_provinces)
+
+
+class ProfileLatestPostsViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = ProfileWithLatestPostsSerializer
+    permission_classes = [IsSuperUserOrProvinceAccess]
+    filterset_class = ProfileFilter
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_superuser:
+            return Profile.objects.prefetch_related(
+                'celebrities__posts__platform',
+                'celebrities__platform'
+            )
+        user_provinces = UserProvinceAccess.objects.filter(user=user).values_list('province_id', flat=True)
+        return Profile.objects.filter(province_id__in=user_provinces).prefetch_related(
+            'celebrities__posts__platform',
+            'celebrities__platform'
+        )
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
+
