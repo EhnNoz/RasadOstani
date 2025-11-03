@@ -4,7 +4,8 @@ from django.db.models import Q
 import jdatetime
 from datetime import datetime, timedelta
 from django.utils import timezone
-from .models import Post, Channel, Province, UserCategory, NewsType, NewsTopic, PoliticalCategory, Platform, Profile
+from .models import Post, Channel, Province, UserCategory, NewsType, NewsTopic, PoliticalCategory, Platform, Profile, \
+    TvProgram
 from django_filters.rest_framework import BaseInFilter, NumberFilter, CharFilter
 
 
@@ -289,3 +290,33 @@ class ProfileFilter(django_filters.FilterSet):
             return queryset.filter(province__id=value)
         else:
             return queryset.filter(province__name_en__iexact=value)
+
+
+class TvProgramFilter(django_filters.FilterSet):
+    # فیلترهای چند انتخابی
+    province = NumberInFilter(field_name='province__id', lookup_expr='in')
+    province_names = CharInFilter(field_name='province__name_fa', lookup_expr='in')
+
+    # فیلتر متنی برای نام برنامه
+    name = django_filters.CharFilter(field_name='name', lookup_expr='icontains')
+
+    # فیلتر جستجوی ترکیبی
+    search = django_filters.CharFilter(method='filter_search')
+
+    # فیلتر استان با نام انگلیسی
+    province_en = django_filters.CharFilter(field_name='province__name_en', lookup_expr='iexact')
+
+    class Meta:
+        model = TvProgram
+        fields = ['name', 'province', 'province_names', 'province_en', 'search']
+
+    def filter_search(self, queryset, name, value):
+        """فیلتر جستجوی ترکیبی در نام برنامه و توضیحات"""
+        return queryset.filter(
+            Q(name__icontains=value) |
+            Q(tv_program_query__icontains=value) |
+            Q(province__name_fa__icontains=value) |
+            Q(province__name_en__icontains=value)
+        )
+
+

@@ -6,11 +6,11 @@ from django.db.models import Count, Sum, Q
 from django.utils import timezone
 from datetime import timedelta, datetime, date
 from .models import Post, Platform, Province, UserProvinceAccess, Channel, UserCategory, PoliticalCategory, NewsType, \
-    NewsTopic, Profile
+    NewsTopic, Profile, TvProgram
 from .serializers import PostSerializer, PlatformSerializer, ProvinceSerializer, UserProvinceAccessSerializer, \
     ChannelSerializer, UserCategorySerializer, PoliticalCategorySerializer, NewsTypeSerializer, NewsTopicSerializer, \
-    ProfileWithLatestPostsSerializer, ProfileListSerializer
-from .filters import PostFilter, ProvinceStatsFilter, ChannelFilter, ProvinceFilter, ProfileFilter
+    ProfileWithLatestPostsSerializer, ProfileListSerializer, TvProgramSerializer
+from .filters import PostFilter, ProvinceStatsFilter, ChannelFilter, ProvinceFilter, ProfileFilter, TvProgramFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter
 import jdatetime
@@ -549,7 +549,7 @@ class PostViewSet(viewsets.ViewSet):
                     hashtag_provinces[clean_tag].add(province_name)
                     hashtag_counter[clean_tag] += 1
 
-        top_5_hashtags = hashtag_counter.most_common(5)
+        top_5_hashtags = hashtag_counter.most_common(3)
         top_hashtags_list = []
         for hashtag, _ in top_5_hashtags:
             top_hashtags_list.append({
@@ -1010,7 +1010,7 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
             categories_programs_posts.append(program['tv_program__name'])
             data_programs_posts.append({
                 'y': program['post_count'],
-                'color': '#A281DD'
+                'color': '#FB7979'
             })
 
         if categories_programs_posts and data_programs_posts:
@@ -1032,7 +1032,7 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
             categories_programs_views.append(program['tv_program__name'])
             data_programs_views.append({
                 'y': program['total_views'],
-                'color': '#A281DD'
+                'color': '#FB7979'
             })
 
         if categories_programs_views and data_programs_views:
@@ -1120,5 +1120,7 @@ class ProfileLatestPostsViewSet(viewsets.ReadOnlyModelViewSet):
             return self.get_paginated_response(serializer.data)
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
+
+
 
 

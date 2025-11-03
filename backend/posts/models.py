@@ -285,7 +285,7 @@ class Profile(models.Model):
     name = models.CharField(max_length=255, verbose_name=_("نام اصلی"))
     position = models.CharField(max_length=255, blank=True, null=True, verbose_name=_("سمت"))
     category = models.CharField(max_length=255, blank=True, null=True, verbose_name=_("دسته"))
-    photo = models.ImageField(upload_to='profiles/', blank=True, null=True, verbose_name=_("عکس"))
+    photo = models.ImageField(upload_to='api/profiles/', blank=True, null=True, verbose_name=_("عکس"))
     province = models.ForeignKey('Province', on_delete=models.CASCADE, verbose_name=_("استان"))
 
     # فیلدهای زمانی

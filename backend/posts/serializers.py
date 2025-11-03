@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import Post, Platform, Province, UserProvinceAccess, Channel, PoliticalCategory, UserCategory, NewsType, \
-    NewsTopic, CelebrityPost, Celebrity, Profile
+    NewsTopic, CelebrityPost, Celebrity, Profile, TvProgram
 from django.contrib.auth.models import User
 from django.utils.translation import gettext_lazy as _
 
@@ -142,9 +142,10 @@ class PostSerializer(serializers.ModelSerializer):
 
 class ProfileListSerializer(serializers.ModelSerializer):
     province_name = serializers.CharField(source='province.name_fa', read_only=True)
+    photo = serializers.ImageField(use_url=True, read_only=True)
     class Meta:
         model = Profile
-        fields = ['name', 'position', 'category', 'province_name']
+        fields = ['name', 'position', 'category', 'province_name', 'photo']
 
 
 class CelebrityPostSerializer(serializers.ModelSerializer):
@@ -172,3 +173,16 @@ class ProfileWithLatestPostsSerializer(serializers.ModelSerializer):
             platform_name = celeb.platform.name
             posts_by_platform[platform_name] = CelebrityPostSerializer(posts, many=True).data
         return posts_by_platform
+
+
+class TvProgramSerializer(serializers.ModelSerializer):
+    province_name = serializers.CharField(source='province.name_fa', read_only=True)
+    province_name_en = serializers.CharField(source='province.name_en', read_only=True)
+
+    class Meta:
+        model = TvProgram
+        fields = ['id', 'name', 'province', 'province_name', 'province_name_en', 'tv_program_query']
+        read_only_fields = ['id']
+
+
+
