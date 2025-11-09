@@ -1,15 +1,17 @@
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
+from rest_framework.generics import RetrieveAPIView, ListAPIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.db.models import Count, Sum, Q
 from django.utils import timezone
 from datetime import timedelta, datetime, date
 from .models import Post, Platform, Province, UserProvinceAccess, Channel, UserCategory, PoliticalCategory, NewsType, \
-    NewsTopic, Profile, TvProgram
+    NewsTopic, Profile, TvProgram, DefineChannel, DefineTvProgram, DefineProfile, AboutUs
 from .serializers import PostSerializer, PlatformSerializer, ProvinceSerializer, UserProvinceAccessSerializer, \
     ChannelSerializer, UserCategorySerializer, PoliticalCategorySerializer, NewsTypeSerializer, NewsTopicSerializer, \
-    ProfileWithLatestPostsSerializer, ProfileListSerializer, TvProgramSerializer
+    ProfileWithLatestPostsSerializer, ProfileListSerializer, TvProgramSerializer, CurrentUserSerializer, \
+    AddChannelSerializer, AddTvProgramSerializer, AddProfileSerializer, AboutUsSerializer
 from .filters import PostFilter, ProvinceStatsFilter, ChannelFilter, ProvinceFilter, ProfileFilter, TvProgramFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter
@@ -19,6 +21,7 @@ from django.db.models import Count, Sum, Avg, F, ExpressionWrapper, FloatField
 from django.db.models.functions import Coalesce
 from collections import Counter, defaultdict
 import re
+from .permissions import HasProvinceAccess
 
 
 class PlatformViewSet(viewsets.ViewSet):
@@ -1120,6 +1123,83 @@ class ProfileLatestPostsViewSet(viewsets.ReadOnlyModelViewSet):
             return self.get_paginated_response(serializer.data)
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
+
+
+class CurrentUserViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = CurrentUserSerializer
+
+    def get_queryset(self):
+        # فقط کاربر جاری رو برمی‌گردونیم
+        return self.request.user.__class__.objects.filter(id=self.request.user.id)
+
+    def get_object(self):
+        # می‌تونیم اینجا هم کاربر جاری رو برگردونیم
+        return self.request.user
+
+
+class AddChannelViewSet(viewsets.ModelViewSet):
+    serializer_class = AddChannelSerializer
+    permission_classes = [IsAuthenticated, HasProvinceAccess]
+
+    def get_queryset(self):
+        # فقط کانال‌هایی که استانشان در دسترس کاربر است
+        user = self.request.user
+        accessible_provinces = UserProvinceAccess.objects.filter(user=user).values_list('province', flat=True)
+        return DefineChannel.objects.filter(province__in=accessible_provinces)
+
+    def perform_create(self, serializer):
+        # وقتی کاربر کانال اضافه می‌کند، مطمئن شویم که استان آن متعلق به دسترسی‌هایش باشد
+        province = serializer.validated_data.get('province')
+        if not UserProvinceAccess.objects.filter(user=self.request.user, province=province).exists():
+            self.permission_denied(self.request, message="شما به این استان دسترسی ندارید.")
+        serializer.save()
+
+
+class AddTvProgramViewSet(viewsets.ModelViewSet):
+    serializer_class = AddTvProgramSerializer
+    permission_classes = [IsAuthenticated, HasProvinceAccess]
+
+    def get_queryset(self):
+        # فقط کانال‌هایی که استانشان در دسترس کاربر است
+        user = self.request.user
+        accessible_provinces = UserProvinceAccess.objects.filter(user=user).values_list('province', flat=True)
+        return DefineTvProgram.objects.filter(province__in=accessible_provinces)
+
+    def perform_create(self, serializer):
+        # وقتی کاربر کانال اضافه می‌کند، مطمئن شویم که استان آن متعلق به دسترسی‌هایش باشد
+        province = serializer.validated_data.get('province')
+        if not UserProvinceAccess.objects.filter(user=self.request.user, province=province).exists():
+            self.permission_denied(self.request, message="شما به این استان دسترسی ندارید.")
+        serializer.save()
+
+
+class AddProfileViewSet(viewsets.ModelViewSet):
+    serializer_class = AddProfileSerializer
+    permission_classes = [IsAuthenticated, HasProvinceAccess]
+
+    def get_queryset(self):
+        # فقط کانال‌هایی که استانشان در دسترس کاربر است
+        user = self.request.user
+        accessible_provinces = UserProvinceAccess.objects.filter(user=user).values_list('province', flat=True)
+        return DefineProfile.objects.filter(province__in=accessible_provinces)
+
+    def perform_create(self, serializer):
+        # وقتی کاربر کانال اضافه می‌کند، مطمئن شویم که استان آن متعلق به دسترسی‌هایش باشد
+        province = serializer.validated_data.get('province')
+        if not UserProvinceAccess.objects.filter(user=self.request.user, province=province).exists():
+            self.permission_denied(self.request, message="شما به این استان دسترسی ندارید.")
+        serializer.save()
+
+
+class AboutUsView(RetrieveAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = AboutUsSerializer
+
+    def get_object(self):
+        # فقط اولین رکورد را برمی‌گرداند (چون منطقاً فقط یکی وجود دارد)
+        return AboutUs.objects.first()
+
 
 
 

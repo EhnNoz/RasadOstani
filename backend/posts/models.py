@@ -170,7 +170,6 @@ class Post(models.Model):
         ('document', 'Document'),
     ]
 
-
     SENTIMENT_CHOICES = [
         ('positive', 'Positive'),
         ('negative', 'Negative'),
@@ -224,7 +223,6 @@ class Post(models.Model):
         blank=True
     )
 
-
     news_type = models.ForeignKey(
         'NewsType',  # نام اپ و مدل
         on_delete=models.SET_NULL,
@@ -248,7 +246,6 @@ class Post(models.Model):
         null=True,
         blank=True
     )
-
 
     class Meta:
         verbose_name = _("پست")
@@ -337,6 +334,7 @@ class Celebrity(models.Model):
 
     def __str__(self):
         return f"{self.profile.name} - {self.profile.position} - {self.platform}"
+
 
 class CelebrityPost(models.Model):
     MEDIA_TYPE_CHOICES = [
@@ -445,3 +443,98 @@ class CelebrityPost(models.Model):
         return f"{self.datetime_create} - {self.celebrity.profile.name}"
 
 
+class DefineChannel(models.Model):
+    # اطلاعات پایه
+    name_fa = models.CharField(max_length=100, verbose_name=_("نام فارسی کانال"))
+    username = models.CharField(max_length=100, verbose_name=_("نام کاربری"))
+
+    # دسته‌بندی‌های ForeignKey
+
+    political_category = models.ForeignKey(
+        PoliticalCategory,
+        on_delete=models.SET_NULL,
+        verbose_name=_("دسته‌بندی سیاسی"),
+        null=True,
+        blank=True,
+        related_name='definechannels'
+    )
+    user_category = models.ForeignKey(
+        UserCategory,
+        on_delete=models.SET_NULL,
+        verbose_name=_("دسته کاربری اصلی"),
+        null=True,
+        blank=True,
+        related_name='definechannels'
+    )
+
+    platform = models.ForeignKey('Platform', on_delete=models.CASCADE, verbose_name=_("پلتفرم"))
+    province = models.ForeignKey(Province, on_delete=models.CASCADE, verbose_name=_("استان"))
+
+    class Meta:
+        verbose_name = _("تعریف کانال")
+        verbose_name_plural = _("تعریف کانال‌ها")
+        indexes = [
+            models.Index(fields=['username']),
+            models.Index(fields=['political_category']),
+            models.Index(fields=['user_category']),
+            models.Index(fields=['platform']),
+        ]
+
+    def __str__(self):
+        return f"{self.name_fa} - {self.username}"
+
+    def get_main_category(self):
+        """برگرداندن دسته‌بندی اصلی بر اساس نوع کانال"""
+        if self.channel_type == 'political' and self.political_category:
+            return self.political_category.name
+        elif self.channel_type == 'user_group' and self.user_category:
+            return self.user_category.name
+        return "بدون دسته‌بندی"
+
+
+class DefineTvProgram(models.Model):
+    name = models.CharField(max_length=100, verbose_name=_("نام برنامه"))
+    province = models.ForeignKey(Province, on_delete=models.CASCADE, verbose_name=_("استان"))
+    tv_program_query = models.TextField(blank=True, null=True, verbose_name=_("توضیحات"))
+
+    class Meta:
+        verbose_name = _("تعریف برنامه")
+        verbose_name_plural = _("تعریف برنامه ها")
+
+    def __str__(self):
+        return self.name
+
+
+class DefineProfile(models.Model):
+    # فیلدهای اصلی پروفایل
+    name = models.CharField(max_length=255, verbose_name=_("نام اصلی"))
+    position = models.CharField(max_length=255, blank=True, null=True, verbose_name=_("سمت"))
+    category = models.CharField(max_length=255, blank=True, null=True, verbose_name=_("دسته"))
+    photo = models.ImageField(upload_to='api/define-profiles/', blank=True, null=True, verbose_name=_("عکس"))
+    province = models.ForeignKey('Province', on_delete=models.CASCADE, verbose_name=_("استان"))
+
+
+    class Meta:
+        verbose_name = _("تعریف چهره")
+        verbose_name_plural = _("تعریف چهره")
+        indexes = [
+            models.Index(fields=['name']),
+            models.Index(fields=['category']),
+            models.Index(fields=['position']),
+            models.Index(fields=['province']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} - {self.position} - {self.province}"
+
+
+class AboutUs(models.Model):
+    title = models.CharField(max_length=200, verbose_name=_("عنوان"))
+    description = models.TextField(verbose_name=_("توضیحات"))
+
+    class Meta:
+        verbose_name = _("درباره ما")
+        verbose_name_plural = _("درباره ما")
+
+    def __str__(self):
+        return self.title

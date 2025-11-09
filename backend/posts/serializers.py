@@ -1,8 +1,11 @@
 from rest_framework import serializers
 from .models import Post, Platform, Province, UserProvinceAccess, Channel, PoliticalCategory, UserCategory, NewsType, \
-    NewsTopic, CelebrityPost, Celebrity, Profile, TvProgram
+    NewsTopic, CelebrityPost, Celebrity, Profile, TvProgram, DefineChannel, DefineTvProgram, DefineProfile, AboutUs
 from django.contrib.auth.models import User
 from django.utils.translation import gettext_lazy as _
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
 
 
 class ProvinceSerializer(serializers.ModelSerializer):
@@ -183,6 +186,44 @@ class TvProgramSerializer(serializers.ModelSerializer):
         model = TvProgram
         fields = ['id', 'name', 'province', 'province_name', 'province_name_en', 'tv_program_query']
         read_only_fields = ['id']
+
+
+class CurrentUserSerializer(serializers.ModelSerializer):
+    is_superadmin = serializers.BooleanField(source='is_superuser', read_only=True)
+
+    class Meta:
+        model = User
+        fields = ['id', 'username', 'first_name', 'last_name', 'email', 'is_superadmin']
+
+
+
+# serializers.py
+
+
+class AddChannelSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DefineChannel
+        fields = '__all__'
+
+
+class AddTvProgramSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DefineTvProgram
+        fields = '__all__'
+
+
+class AddProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DefineProfile
+        fields = '__all__'
+
+
+class AboutUsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AboutUs
+        fields = ['title', 'description']
+
+
 
 
 

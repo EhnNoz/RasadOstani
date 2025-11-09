@@ -4,7 +4,8 @@ from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User
 from .models import (
     Channel, Platform, Province, NewsType, NewsTopic,
-    Post, UserProvinceAccess, PoliticalCategory, UserCategory, TvProgram, Celebrity, CelebrityPost, Profile
+    Post, UserProvinceAccess, PoliticalCategory, UserCategory, TvProgram, Celebrity, CelebrityPost, Profile,
+    DefineChannel, DefineTvProgram, DefineProfile, AboutUs
 )
 from django.utils.translation import gettext_lazy as _
 
@@ -291,6 +292,83 @@ class CelebrityPostAdmin(admin.ModelAdmin):
         queryset = super().get_queryset(request)
         queryset = queryset.select_related('celebrity', 'platform', 'province', 'news_type', 'news_topic')
         return queryset
+
+
+@admin.register(DefineChannel)
+class AddChannelAdmin(admin.ModelAdmin):
+    list_display = ('name_fa', 'username', 'platform', 'province', 'political_category', 'user_category')
+    list_filter = ('platform', 'province', 'political_category', 'user_category')
+    search_fields = ('name_fa', 'username')
+    list_select_related = ('platform', 'province', 'political_category', 'user_category')
+    autocomplete_fields = ('political_category', 'user_category', 'platform', 'province')
+
+    fieldsets = (
+        (_("اطلاعات پایه"), {
+            'fields': ('name_fa', 'username')
+        }),
+        (_("دسته‌بندی‌ها"), {
+            'fields': ('political_category', 'user_category', 'platform', 'province')
+        }),
+    )
+
+    class Meta:
+        verbose_name = _("تعریف کانال")
+        verbose_name_plural = _("تعریف کانال‌ها")
+
+
+@admin.register(DefineTvProgram)
+class AddTvProgramAdmin(admin.ModelAdmin):
+    list_display = ('name', 'province')
+    list_filter = ('name', 'province')
+    search_fields = ('name', 'province')
+    list_select_related = ('province',)
+    autocomplete_fields = ('province',)
+
+    fieldsets = (
+        (_("اطلاعات پایه"), {
+            'fields': ('name', 'province')
+        }),
+        (_("دسته‌بندی‌ها"), {
+            'fields': ('tv_program_query',)
+        }),
+    )
+
+    class Meta:
+        verbose_name = _("تعریف برنامه")
+        verbose_name_plural = _("تعریف برنامه")
+
+
+@admin.register(DefineProfile)
+class AddProfileAdmin(admin.ModelAdmin):
+    list_display = ('name', 'position', 'category', 'province')
+    list_filter = ('name', 'position', 'category', 'province')
+    search_fields = ('name', 'position', 'category', 'province')
+    list_select_related = ('province',)
+    autocomplete_fields = ('province',)
+
+    fieldsets = (
+        (_("اطلاعات پایه"), {
+            'fields': ('name', 'position', 'category', 'province')
+        }),
+        (_("دسته‌بندی‌ها"), {
+            'fields': ('photo',)
+        }),
+    )
+
+    class Meta:
+        verbose_name = _("تعریف برنامه")
+        verbose_name_plural = _("تعریف برنامه")
+
+
+@admin.register(AboutUs)
+class AboutUsAdmin(admin.ModelAdmin):
+    def has_add_permission(self, request):
+        # اگر قبلاً رکوردی وجود دارد، اجازه افزودن نده
+        return not AboutUs.objects.exists()
+
+    def has_delete_permission(self, request, obj=None):
+        return False  # حذف هم غیرفعال (اختیاری)
+
 
 # رجیستر مدل‌ها
 admin.site.register(PoliticalCategory, PoliticalCategoryAdmin)
