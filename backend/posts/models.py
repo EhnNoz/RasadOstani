@@ -5,6 +5,11 @@ from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db.models import Count, Sum, Q
 from django.utils.translation import gettext_lazy as _
+from django.contrib.postgres.search import SearchVectorField
+from django.contrib.postgres.indexes import GinIndex
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.contrib.postgres.search import SearchVector
 
 
 class PoliticalCategory(models.Model):
@@ -133,6 +138,7 @@ class Channel(models.Model):
     sub_category = models.CharField(max_length=100, verbose_name=_("دسته‌بندی فرعی"), blank=True, null=True)
     tag = models.CharField(max_length=100, verbose_name=_("تگ"), blank=True, null=True)
     platform = models.ForeignKey('Platform', on_delete=models.CASCADE, verbose_name=_("پلتفرم"))
+    member = models.IntegerField(verbose_name=_("تعداد عضو"))
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("تاریخ ایجاد"))
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_("تاریخ بروزرسانی"))
 
@@ -247,6 +253,8 @@ class Post(models.Model):
         blank=True
     )
 
+    search_vector = SearchVectorField(null=True, blank=True)
+
     class Meta:
         verbose_name = _("پست")
         verbose_name_plural = _("پست‌ها")
@@ -258,10 +266,27 @@ class Post(models.Model):
             models.Index(fields=['channel']),  # جایگزین شاخص‌های قبلی
             models.Index(fields=['news_type']),
             models.Index(fields=['news_topic']),
+            GinIndex(fields=['search_vector'], name='post_search_vector_idx'),
         ]
 
     def __str__(self):
         return f"{self.username} - {self.datetime_create}"
+
+@receiver(post_save, sender=Post)
+def update_search_vector(sender, instance, **kwargs):
+    # فقط اگر موردی ذخیره شد (نه در حین مایگریت)
+    if instance.pk:
+        instance.search_vector = (
+            SearchVector('username', weight='A', config='simple') +
+            SearchVector('description', weight='B', config='simple') +
+            SearchVector('reply_text', weight='B', config='simple') +
+            SearchVector('extracted_hashtag', weight='C', config='simple') +
+            SearchVector('extracted_mention', weight='C', config='simple')
+            # SearchVector('channel__name_fa', weight='A', config='simple') +
+            # SearchVector('channel__username', weight='A', config='simple')
+        )
+        # استفاده از update_fields برای جلوگیری از حلقه‌ی بی‌نهایت
+        Post.objects.filter(pk=instance.pk).update(search_vector=instance.search_vector)
 
 
 class UserProvinceAccess(models.Model):
@@ -512,6 +537,9 @@ class DefineProfile(models.Model):
     category = models.CharField(max_length=255, blank=True, null=True, verbose_name=_("دسته"))
     photo = models.ImageField(upload_to='api/define-profiles/', blank=True, null=True, verbose_name=_("عکس"))
     province = models.ForeignKey('Province', on_delete=models.CASCADE, verbose_name=_("استان"))
+    platform = models.ForeignKey('Platform', on_delete=models.CASCADE, verbose_name=_("پلتفرم"))
+    name_fa = models.CharField(max_length=100, verbose_name=_("نام فارسی کانال"))
+    username = models.CharField(max_length=100, verbose_name=_("نام کاربری"))
 
 
     class Meta:
@@ -538,3 +566,6 @@ class AboutUs(models.Model):
 
     def __str__(self):
         return self.title
+
+
+

@@ -22,7 +22,9 @@ from django.db.models.functions import Coalesce
 from collections import Counter, defaultdict
 import re
 from .permissions import HasProvinceAccess
-
+import json
+import hashlib
+from django.core.cache import cache
 
 class PlatformViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
@@ -331,51 +333,84 @@ class ChannelViewSet(viewsets.ModelViewSet):
 class PostViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
-    def _get_filtered_queryset(self, request):
-        """متد کمکی برای فیلتر کردن queryset"""
-        user = request.user
+    def _get_cache_key(self, request, view_name, extra_parts=None):
+        """تولید کلید کش منحصربه‌فرد بر اساس کاربر، view و پارامترها"""
+        parts = [str(request.user.id), view_name]
+        if extra_parts:
+            parts.extend(str(p) for p in extra_parts)
+        # اضافه کردن query_params به صورت مرتب‌شده
+        if hasattr(request, 'query_params'):
+            params = dict(sorted(request.query_params.items()))
+            parts.append(json.dumps(params, sort_keys=True, default=str))
+        key_str = "|".join(parts)
+        return hashlib.md5(key_str.encode('utf-8')).hexdigest()
 
-        # فیلتر بر اساس دسترسی کاربر
+    def _invalidate_cache_for_user(self, user_id):
+        """پاک کردن هوشمند کش نیازمند استراتژی؛ در اینجا ما فقط همه کش‌های مرتبط را نمی‌توانیم پاک کنیم.
+        به جای آن، در عملیات نوشتن (create/update/delete) کل کش را flush نمی‌کنیم، بلکه فقط در صورت نیاز دستی پاک می‌کنیم.
+        برای سادگی، ما فقط کش‌های مرتبط با `list` و `statistics` را نمی‌توانیم پاک کنیم — پس timeout کوتاه می‌ذاریم.
+        اگر نیاز به پاک کردن دقیق داری، باید از الگوی دیگری استفاده کنی."""
+        pass  # در این پیاده‌سازی، از timeout استفاده می‌کنیم
+
+    def _get_filtered_queryset(self, request):
+        user = request.user
         if user.is_superuser:
             queryset = Post.objects.all()
         else:
             user_provinces = UserProvinceAccess.objects.filter(user=user).values_list('province_id', flat=True)
             queryset = Post.objects.filter(province_id__in=user_provinces)
-
-        # اعمال فیلترهای اضافی
         post_filter = PostFilter(request.query_params, queryset=queryset)
         return post_filter.qs
 
+    def _remove_duplicate_posts(self, queryset):
+        """
+        حذف پست‌های تکراری بر اساس تاریخ ایجاد، کانال و پلتفرم
+        و انتخاب پستی با بیشترین بازدید
+        """
+        from django.db.models import OuterRef, Subquery
+
+        # زیرکوئری برای پیدا کردن پست با بیشترین بازدید در هر گروه
+        max_view_subquery = queryset.filter(
+            datetime_create=OuterRef('datetime_create'),
+            channel_id=OuterRef('channel_id'),
+            platform_id=OuterRef('platform_id')
+        ).order_by('-view_count').values('id')[:1]
+
+        # فقط پست‌هایی که دارای بیشترین بازدید در گروه خود هستند را نگه داریم
+        return queryset.filter(id=Subquery(max_view_subquery))
+
     def list(self, request):
+        cache_key = self._get_cache_key(request, 'post_list')
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        # ✅ این خط، جستجوی Full-Text را از طریق PostFilter اعمال می‌کند
         queryset = self._get_filtered_queryset(request)
 
-        # جستجو
-        search_term = request.query_params.get('search', None)
-        if search_term:
-            queryset = queryset.filter(
-                Q(username__icontains=search_term) |
-                Q(description__icontains=search_term) |
-                Q(reply_text__icontains=search_term)
-            )
+        # 🔥 اعمال فیلتر حذف داپلیکیت‌ها
+        queryset = self._remove_duplicate_posts(queryset)
 
-        # دریافت نوع مرتب‌سازی از پارامترهای درخواست
         sort_by = request.query_params.get('sort_by', 'newest')
-
-        # اعمال مرتب‌سازی بر اساس نوع درخواست شده
         if sort_by == 'likes':
             queryset = queryset.order_by('-like_count')[:20]
         elif sort_by == 'views':
             queryset = queryset.order_by('-view_count')[:20]
-        elif sort_by == 'newest':
-            queryset = queryset.order_by('-datetime_create')[:20]
-        else:
-            # حالت پیش‌فرض - 20 پست جدیدترین
+        else:  # 'newest' or default
             queryset = queryset.order_by('-datetime_create')[:20]
 
         serializer = PostSerializer(queryset, many=True)
-        return Response(serializer.data)
+        data = serializer.data
+
+        cache.set(cache_key, data, timeout=5 * 60)
+        return Response(data)
 
     def retrieve(self, request, pk=None):
+        cache_key = self._get_cache_key(request, 'post_retrieve', extra_parts=[pk])
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
         try:
             post = Post.objects.get(pk=pk)
             user = request.user
@@ -389,14 +424,18 @@ class PostViewSet(viewsets.ViewSet):
                     )
 
             serializer = PostSerializer(post)
-            return Response(serializer.data)
+            data = serializer.data
+            cache.set(cache_key, data, timeout=10 * 60)  # 10 دقیقه
+            return Response(data)
         except Post.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
+    # --- عملیات‌های نوشتن: بدون کش، ولی می‌توانیم در آینده کش را پاک کنیم ---
     def create(self, request):
         serializer = PostSerializer(data=request.data)
         if serializer.is_valid():
             serializer.save()
+            # اگر بخواهی کش را پاک کنی، اینجا می‌توانی یک signal یا cache.delete_many() اجرا کنی
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -404,7 +443,6 @@ class PostViewSet(viewsets.ViewSet):
         try:
             post = Post.objects.get(pk=pk)
             user = request.user
-
             if not user.is_superuser:
                 user_provinces = UserProvinceAccess.objects.filter(user=user).values_list('province_id', flat=True)
                 if post.province_id not in user_provinces:
@@ -412,7 +450,6 @@ class PostViewSet(viewsets.ViewSet):
                         {"detail": "You do not have permission to update this post."},
                         status=status.HTTP_403_FORBIDDEN
                     )
-
             serializer = PostSerializer(post, data=request.data)
             if serializer.is_valid():
                 serializer.save()
@@ -422,31 +459,12 @@ class PostViewSet(viewsets.ViewSet):
             return Response(status=status.HTTP_404_NOT_FOUND)
 
     def partial_update(self, request, pk=None):
-        try:
-            post = Post.objects.get(pk=pk)
-            user = request.user
-
-            if not user.is_superuser:
-                user_provinces = UserProvinceAccess.objects.filter(user=user).values_list('province_id', flat=True)
-                if post.province_id not in user_provinces:
-                    return Response(
-                        {"detail": "You do not have permission to update this post."},
-                        status=status.HTTP_403_FORBIDDEN
-                    )
-
-            serializer = PostSerializer(post, data=request.data, partial=True)
-            if serializer.is_valid():
-                serializer.save()
-                return Response(serializer.data)
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        except Post.DoesNotExist:
-            return Response(status=status.HTTP_404_NOT_FOUND)
+        return self.update(request, pk)  # ساده‌سازی
 
     def destroy(self, request, pk=None):
         try:
             post = Post.objects.get(pk=pk)
             user = request.user
-
             if not user.is_superuser:
                 user_provinces = UserProvinceAccess.objects.filter(user=user).values_list('province_id', flat=True)
                 if post.province_id not in user_provinces:
@@ -454,23 +472,29 @@ class PostViewSet(viewsets.ViewSet):
                         {"detail": "You do not have permission to delete this post."},
                         status=status.HTTP_403_FORBIDDEN
                     )
-
             post.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
         except Post.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
+
     @action(detail=False, methods=['get'])
     def statistics(self, request):
+        cache_key = self._get_cache_key(request, 'post_statistics')
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
         queryset = self._get_filtered_queryset(request)
 
-        # آمار کلی
+        # 🔥 اعمال فیلتر حذف داپلیکیت‌ها
+        queryset = self._remove_duplicate_posts(queryset)
+
         total_posts = queryset.count()
         unique_users = queryset.values('username').distinct().count()
         total_views = queryset.aggregate(total_views=Sum('view_count'))['total_views'] or 0
         total_likes = queryset.aggregate(total_likes=Sum('like_count'))['total_likes'] or 0
 
-        # روند روزانه — استفاده از DATE(datetime_create) برای گروه‌بندی بر اساس تاریخ
         daily_trend_qs = queryset.extra(
             select={'date': "DATE(datetime_create)"}
         ).values('date').annotate(
@@ -479,7 +503,6 @@ class PostViewSet(viewsets.ViewSet):
             likes=Sum('like_count')
         ).order_by('date')
 
-        # تبدیل تاریخ‌ها به شمسی و آماده‌سازی داده‌ها
         daily_categories = []
         daily_post_data = []
         daily_view_data = []
@@ -487,7 +510,6 @@ class PostViewSet(viewsets.ViewSet):
 
         for item in daily_trend_qs:
             gregorian_date = item['date']
-
             if isinstance(gregorian_date, datetime):
                 gregorian_date = gregorian_date.date()
             elif isinstance(gregorian_date, str):
@@ -502,37 +524,18 @@ class PostViewSet(viewsets.ViewSet):
             try:
                 jalali_date = jdate.fromgregorian(date=gregorian_date)
                 jalali_str = f"{jalali_date.year:04d}-{jalali_date.month:02d}-{jalali_date.day:02d}"
+                daily_categories.append(jalali_str)
+                daily_post_data.append(item['posts'])
+                daily_view_data.append(item['views'])
+                daily_like_data.append(item['likes'])
             except (ValueError, OverflowError):
                 continue
 
-            daily_categories.append(jalali_str)
-            daily_post_data.append(item['posts'])
-            daily_view_data.append(item['views'])
-            daily_like_data.append(item['likes'])
+        daily_trend = {"name": "روند روزانه پست‌ها", "categories": daily_categories, "data": daily_post_data,
+                       "color": "#A281DD"}
+        view_trend = {"name": "روند بازدیدها", "categories": daily_categories, "data": daily_view_data, "color": "#A281DD"}
+        like_trend = {"name": "روند لایک‌ها", "categories": daily_categories, "data": daily_like_data, "color": "#A281DD"}
 
-        # ساخت ساختار نهایی برای نمودارها
-        daily_trend = {
-            "name": "روند روزانه پست‌ها",
-            "categories": daily_categories,
-            "data": daily_post_data,
-            "color": "#A281DD"
-        }
-
-        view_trend = {
-            "name": "روند بازدیدها",
-            "categories": daily_categories,
-            "data": daily_view_data,
-            "color": "#A281DD"
-        }
-
-        like_trend = {
-            "name": "روند لایک‌ها",
-            "categories": daily_categories,
-            "data": daily_like_data,
-            "color": "#A281DD"
-        }
-
-        # --- استخراج 5 هشتگ برتر و استان‌های مرتبط ---
         posts_with_hashtags = queryset.filter(
             extracted_hashtag__isnull=False
         ).exclude(
@@ -560,7 +563,6 @@ class PostViewSet(viewsets.ViewSet):
                 "channel_categories": sorted(list(hashtag_provinces[hashtag]))
             })
 
-        # ساخت داده‌های نهایی
         data = {
             'total_posts': total_posts,
             'unique_users': unique_users,
@@ -569,34 +571,64 @@ class PostViewSet(viewsets.ViewSet):
             'daily_trend': [daily_trend],
             'view_trend': [view_trend],
             'like_trend': [like_trend],
-            'top_hashtags': top_hashtags_list  # ✅ اضافه شده
+            'top_hashtags': top_hashtags_list
         }
 
+        cache.set(cache_key, data, timeout=1 * 6)  # 10 دقیقه
         return Response(data)
+
 
 class ProvinceStatsViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
-    def _get_filtered_queryset(self, request):
-        """متد کمکی برای فیلتر کردن queryset بر اساس دسترسی کاربر"""
-        user = request.user
+    def _get_cache_key(self, request):
+        """تولید کلید کش منحصربه‌فرد بر اساس کاربر و query_params"""
+        user_id = request.user.id
+        params = dict(sorted(request.query_params.items()))
+        params_str = json.dumps(params, sort_keys=True, default=str)
+        key_str = f"province_stats_user_{user_id}_params_{params_str}"
+        return hashlib.md5(key_str.encode('utf-8')).hexdigest()
 
-        # فیلتر بر اساس دسترسی کاربر
+    def _get_filtered_queryset(self, request):
+        user = request.user
         if user.is_superuser:
             queryset = Post.objects.all()
         else:
             user_provinces = UserProvinceAccess.objects.filter(user=user).values_list('province_id', flat=True)
             queryset = Post.objects.filter(province_id__in=user_provinces)
 
-        # اعمال فیلترهای اضافی
         stats_filter = ProvinceStatsFilter(request.query_params, queryset=queryset)
         return stats_filter.qs
 
+    def _remove_duplicate_posts(self, queryset):
+        """
+        حذف پست‌های تکراری بر اساس تاریخ ایجاد، کانال و پلتفرم
+        و انتخاب پستی با بیشترین بازدید
+        """
+        from django.db.models import OuterRef, Subquery
+
+        # زیرکوئری برای پیدا کردن پست با بیشترین بازدید در هر گروه
+        max_view_subquery = queryset.filter(
+            datetime_create=OuterRef('datetime_create'),
+            channel_id=OuterRef('channel_id'),
+            platform_id=OuterRef('platform_id')
+        ).order_by('-view_count').values('id')[:1]
+
+        # فقط پست‌هایی که دارای بیشترین بازدید در گروه خود هستند را نگه داریم
+        return queryset.filter(id=Subquery(max_view_subquery))
+
     def list(self, request):
-        """Endpoint برای آمار پست‌ها به تفکیک استان"""
+        cache_key = self._get_cache_key(request)
+        cached_data = cache.get(cache_key)
+        if cached_data is not None:
+            return Response(cached_data)
+
+        # ---- شروع محاسبات اصلی ----
         queryset = self._get_filtered_queryset(request)
 
-        # فیلتر بر اساس تاریخ (پیش‌فرض ۷ روز اخیر)
+        # 🔥 اعمال فیلتر حذف داپلیکیت‌ها
+        queryset = self._remove_duplicate_posts(queryset)
+
         start_date_param = request.query_params.get('start_date')
         end_date_param = request.query_params.get('end_date')
 
@@ -607,20 +639,13 @@ class ProvinceStatsViewSet(viewsets.ViewSet):
                 datetime_create__range=(default_start_date, default_end_date)
             )
 
-        # گروه‌بندی بر اساس استان و شمارش پست‌ها
         province_stats = queryset.values(
             'province__name_en',
             'province__name_fa',
-            'province__code'  # اضافه کردن فیلد کد استان
+            'province__code'
         ).annotate(
             post_count=Count('id')
         ).order_by('-post_count')
-
-        # تبدیل به فرمت مورد نظر
-        # data = [
-        #     [f"{stat['province__name_en']}", stat['post_count']]
-        #     for stat in province_stats
-        # ]
 
         all_provinces = {
             "ardabil": 0,
@@ -656,17 +681,15 @@ class ProvinceStatsViewSet(viewsets.ViewSet):
             "yazd": 0,
         }
 
-        # به روزرسانی مقادیر
         for stat in province_stats:
             province_name = stat['province__name_en']
-            # تبدیل نام استان به فرمت camelCase اگر لازم است
             if province_name in all_provinces:
                 all_provinces[province_name] = stat['post_count']
 
+        # ذخیره در کش برای 10 دقیقه
+        cache.set(cache_key, all_provinces, timeout=1 * 6)
+
         return Response(all_provinces)
-
-        # return Response(data)
-
 # class PoliticalCurrentViewSet(viewsets.ModelViewSet):
 #     queryset = PoliticalCurrent.objects.all()
 #     serializer_class = PoliticalCurrentSerializer
@@ -733,6 +756,7 @@ def prepare_pie_series(data_list, name_field, count_field, colors=None):
 
 
 # views.py - در AdvancedAnalyticsViewSet
+
 class AdvancedAnalyticsViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
@@ -749,8 +773,42 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
         post_filter = PostFilter(request.query_params, queryset=queryset)
         return post_filter.qs
 
+    def _remove_duplicate_posts(self, queryset):
+        """
+        حذف پست‌های تکراری بر اساس تاریخ ایجاد، کانال و پلتفرم
+        و انتخاب پستی با بیشترین بازدید
+        """
+        from django.db.models import OuterRef, Subquery
+
+        # زیرکوئری برای پیدا کردن پست با بیشترین بازدید در هر گروه
+        max_view_subquery = queryset.filter(
+            datetime_create=OuterRef('datetime_create'),
+            channel_id=OuterRef('channel_id'),
+            platform_id=OuterRef('platform_id')
+        ).order_by('-view_count').values('id')[:1]
+
+        # فقط پست‌هایی که دارای بیشترین بازدید در گروه خود هستند را نگه داریم
+        return queryset.filter(id=Subquery(max_view_subquery))
+
+    def _get_cache_key(self, request):
+        """تولید کلید منحصربه‌فرد برای کش بر اساس کاربر و query_params"""
+        user_id = request.user.id
+        params = dict(sorted(request.query_params.items()))
+        params_str = json.dumps(params, sort_keys=True, default=str)
+        key_str = f"advanced_analytics_user_{user_id}_params_{params_str}"
+        return hashlib.md5(key_str.encode('utf-8')).hexdigest()
+
     def list(self, request):
+        cache_key = self._get_cache_key(request)
+        cached_data = cache.get(cache_key)
+        if cached_data is not None:
+            return Response(cached_data)
+
+        # === شروع محاسبات سنگین ===
         queryset = self._get_filtered_queryset(request)
+
+        # 🔥 اعمال فیلتر حذف داپلیکیت‌ها
+        queryset = self._remove_duplicate_posts(queryset)
 
         # آمار کلی از داده‌های فیلتر شده کاربر
         total_posts = queryset.count()
@@ -759,20 +817,19 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
 
         # محاسبه درصد نسبت به کل داده‌های بدون فیلتر دسترسی کاربر
         if request.user.is_superuser:
-            # برای سوپر یوزر، کل داده‌های سیستم
-            all_posts_count = Post.objects.all().count() or 1
-            all_likes = Post.objects.all().aggregate(total=Coalesce(Sum('like_count'), 0))['total'] or 1
-            all_views = Post.objects.all().aggregate(total=Coalesce(Sum('view_count'), 0))['total'] or 1
+            all_posts = Post.objects.all()
         else:
-            # برای کاربران عادی، کل داده‌هایی که دسترسی دارند
-            user_provinces = UserProvinceAccess.objects.filter(user=request.user).values_list('province_id', flat=True)
-            all_user_posts = Post.objects.filter(province_id__in=user_provinces)
+            user_provinces = UserProvinceAccess.objects.filter(user=request.user).values_list('province_id',
+                                                                                              flat=True)
+            all_posts = Post.objects.filter(province_id__in=user_provinces)
 
-            all_posts_count = all_user_posts.count() or 1
-            all_likes = all_user_posts.aggregate(total=Coalesce(Sum('like_count'), 0))['total'] or 1
-            all_views = all_user_posts.aggregate(total=Coalesce(Sum('view_count'), 0))['total'] or 1
+        # 🔥 اعمال فیلتر حذف داپلیکیت‌ها روی all_posts هم
+        all_posts = self._remove_duplicate_posts(all_posts)
 
-        # محاسبه درصدها
+        all_posts_count = all_posts.count() or 1
+        all_likes = all_posts.aggregate(total=Coalesce(Sum('like_count'), 0))['total'] or 1
+        all_views = all_posts.aggregate(total=Coalesce(Sum('view_count'), 0))['total'] or 1
+
         post_percentage = (total_posts / all_posts_count * 100) if all_posts_count > 0 else 0
         like_percentage = (total_likes / all_likes * 100) if all_likes > 0 else 0
         view_percentage = (total_views / all_views * 100) if all_views > 0 else 0
@@ -788,125 +845,107 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
         top_hashtags = [{'name': tag, 'weight': count} for tag, count in hashtag_counter.most_common(30)]
 
         # کاربران موثر و فعال - بر اساس ترکیب کانال و پلتفرم
-        top_users_by_likes_qs = (queryset.exclude(channel__isnull=True)
-                                     .values('channel__name_fa', 'platform__name')  # تغییر به platform__name
-                                     .annotate(total_likes=Sum('like_count'))
-                                     .order_by('-total_likes')[:20])
+        def serialize_top_users(qs, value_field, limit=20):
+            categories = []
+            data = []
+            for item in qs[:limit]:
+                display_name = f"{item['channel__name_fa']} ({item['platform__name']})"
+                categories.append(display_name)
+                data.append({'y': item[value_field], 'color': '#A281DD'})
+            return [{'categories': categories, 'data': data}] if categories else []
 
-        top_users_by_likes = []
-        categories_likes = []
-        data_likes = []
-        for user in top_users_by_likes_qs:
-            display_name = f"{user['channel__name_fa']} ({user['platform__name']})"  # استفاده از platform__name
-            categories_likes.append(display_name)
-            data_likes.append({
-                'y': user['total_likes'],
-                'color': '#A281DD'
-            })
+        top_users_by_likes_qs = (
+            queryset.exclude(channel__isnull=True)
+            .values('channel__name_fa', 'platform__name')
+            .annotate(total_likes=Sum('like_count'))
+            .order_by('-total_likes')
+        )
+        top_users_by_likes = serialize_top_users(top_users_by_likes_qs, 'total_likes')
 
-        if categories_likes and data_likes:
-            top_users_by_likes.append({
-                'categories': categories_likes,
-                'data': data_likes
-            })
+        top_users_by_views_qs = (
+            queryset.exclude(channel__isnull=True)
+            .values('channel__name_fa', 'platform__name')
+            .annotate(total_views=Sum('view_count'))
+            .order_by('-total_views')
+        )
+        top_users_by_views = serialize_top_users(top_users_by_views_qs, 'total_views')
 
-        top_users_by_views_qs = (queryset.exclude(channel__isnull=True)
-                                     .values('channel__name_fa', 'platform__name')  # تغییر به platform__name
-                                     .annotate(total_views=Sum('view_count'))
-                                     .order_by('-total_views')[:20])
-
-        top_users_by_views = []
-        categories_views = []
-        data_views = []
-        for user in top_users_by_views_qs:
-            display_name = f"{user['channel__name_fa']} ({user['platform__name']})"  # استفاده از platform__name
-            categories_views.append(display_name)
-            data_views.append({
-                'y': user['total_views'],
-                'color': '#A281DD'
-            })
-
-        if categories_views and data_views:
-            top_users_by_views.append({
-                'categories': categories_views,
-                'data': data_views
-            })
-
-        active_users_qs = (queryset.exclude(channel__isnull=True)
-                               .values('channel__name_fa', 'platform__name')  # تغییر به platform__name
-                               .annotate(post_count=Count('id'))
-                               .order_by('-post_count')[:20])
-
-        active_users = []
-        categories_active = []
-        data_active = []
-        for user in active_users_qs:
-            display_name = f"{user['channel__name_fa']} ({user['platform__name']})"  # استفاده از platform__name
-            categories_active.append(display_name)
-            data_active.append({
-                'y': user['post_count'],
-                'color': '#A281DD'
-            })
-
-        if categories_active and data_active:
-            active_users.append({
-                'categories': categories_active,
-                'data': data_active
-            })
+        active_users_qs = (
+            queryset.exclude(channel__isnull=True)
+            .values('channel__name_fa', 'platform__name')
+            .annotate(post_count=Count('id'))
+            .order_by('-post_count')
+        )
+        active_users = serialize_top_users(active_users_qs, 'post_count')
 
         # فعالترین کانال‌ها - با پلتفرم
-        active_channels_qs = (queryset.exclude(channel__isnull=True)
-                                  .values('channel__name_fa', 'platform__name')  # تغییر به platform__name
-                                  .annotate(post_count=Count('id'))
-                                  .order_by('-post_count')[:10])
-
-        active_channels = []
-        for channel in active_channels_qs:
-            display_name = f"{channel['channel__name_fa']} ({channel['platform__name']})"  # استفاده از platform__name
-            active_channels.append({
-                'name': display_name,
-                'y': channel['post_count'],
+        active_channels_qs = (
+            queryset.exclude(channel__isnull=True)
+            .values('channel__name_fa', 'platform__name')
+            .annotate(post_count=Count('id'))
+            .order_by('-post_count')[:10]
+        )
+        active_channels = [
+            {
+                'name': f"{ch['channel__name_fa']} ({ch['platform__name']})",
+                'y': ch['post_count'],
                 'color': '#69AAD1'
-            })
+            }
+            for ch in active_channels_qs
+        ]
 
         # توزیع کانال‌ها بر اساس نوع
-        channel_type_stats = (queryset.exclude(channel__isnull=True)
-                              .values('channel__channel_type')
-                              .annotate(count=Count('id'))
-                              .order_by('-count'))
-
+        channel_type_stats = (
+            queryset.exclude(channel__isnull=True)
+            .values('channel__channel_type')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
         channel_type_distribution = prepare_pie_series(
             list(channel_type_stats),
             name_field='channel__channel_type',
             count_field='count'
         )
 
-        # فراوانی جریانات سیاسی (بر اساس تعداد پست)
-        political_currents_stats = (queryset.exclude(channel__political_category__isnull=True)
-                                        .values('channel__political_category__name')
-                                        .annotate(
-            post_count=Count('id'),
-            total_likes=Sum('like_count'),
-            total_views=Sum('view_count')
+        # فراوانی جریانات سیاسی
+        # --- فراوانی جریانات سیاسی ---
+        political_currents_raw = (
+            queryset
+                .exclude(channel__political_category__isnull=True)
+                .values('channel__political_category__name')
+                .annotate(
+                post_count=Count('id'),
+                total_likes=Sum('like_count'),
+                total_views=Sum('view_count')
+            )
         )
-                                        .order_by('-post_count')[:15])
+
+        # ✅ گروه‌بندی دستی بر اساس نام
+        pc_grouped = defaultdict(int)
+        for item in political_currents_raw:
+            pc_grouped[item['channel__political_category__name']] += item['post_count']
+
+        # مرتب‌سازی و محدود کردن به 15
+        top_pc = sorted(pc_grouped.items(), key=lambda x: -x[1])[:15]
+        political_currents_clean = [{'name': name, 'post_count': count} for name, count in top_pc]
 
         political_currents_distribution = prepare_pie_series(
-            list(political_currents_stats),
-            name_field='channel__political_category__name',
+            political_currents_clean,
+            name_field='name',
             count_field='post_count'
         )
 
-        # فراوانی گروه‌های کاربری (بر اساس تعداد پست)
-        user_groups_stats = (queryset.exclude(channel__user_category__isnull=True)
-                                 .values('channel__user_category__name')
-                                 .annotate(
-            post_count=Count('id'),
-            total_likes=Sum('like_count'),
-            total_views=Sum('view_count')
+        # فراوانی گروه‌های کاربری
+        user_groups_stats = (
+            queryset.exclude(channel__user_category__isnull=True)
+            .values('channel__user_category__name')
+            .annotate(
+                post_count=Count('id'),
+                total_likes=Sum('like_count'),
+                total_views=Sum('view_count')
+            )
+            .order_by('-post_count')[:15]
         )
-                                 .order_by('-post_count')[:15])
-
         user_groups_distribution = prepare_pie_series(
             list(user_groups_stats),
             name_field='channel__user_category__name',
@@ -914,11 +953,11 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
         )
 
         # فراوانی احساسات
-        sentiment_stats = (queryset.values('sentiment')
-                           .annotate(count=Count('id'))
-                           .order_by('-count'))
-
-        # محاسبه درصد احساسات
+        sentiment_stats = (
+            queryset.values('sentiment')
+            .annotate(count=Count('id'))
+            .order_by('-count')
+        )
         sentiment_data = []
         for stat in sentiment_stats:
             percentage = (stat['count'] / total_posts * 100) if total_posts > 0 else 0
@@ -932,12 +971,10 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
         # آمار NPO و EMO
         npo_count = queryset.filter(npo=True).count()
         emo_count = queryset.filter(emo=True).count()
-
         npo_stats = {
             'total_npo': npo_count,
             'npo_percentage': round((npo_count / total_posts * 100) if total_posts > 0 else 0, 2)
         }
-
         emo_stats = {
             'total_emo': emo_count,
             'emo_percentage': round((emo_count / total_posts * 100) if total_posts > 0 else 0, 2)
@@ -946,31 +983,30 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
         # Heatmap موضوعات
         today = datetime.now().date()
         dates_gregorian = [today - timedelta(days=i) for i in range(13, -1, -1)]
-
         dates_categories = []
         for date in dates_gregorian:
             try:
-                jalali_date = jdatetime.date.fromgregorian(date=date)
+                jalali_date = jdatetime.fromgregorian(date=date)
                 dates_categories.append(jalali_date.strftime("%Y-%m-%d"))
-            except:
+            except Exception:
                 dates_categories.append(date.strftime("%Y-%m-%d"))
 
-        heatmap_queryset = Post.objects.filter(
+        # 🔥 استفاده از queryset اصلی به جای Post.objects.filter
+        heatmap_queryset = self._get_filtered_queryset(request).filter(
             datetime_create__date__gte=dates_gregorian[0],
             datetime_create__date__lte=dates_gregorian[-1]
         )
 
-        user = request.user
-        if not user.is_superuser:
-            user_provinces = UserProvinceAccess.objects.filter(user=user).values_list('province_id', flat=True)
-            heatmap_queryset = heatmap_queryset.filter(province_id__in=user_provinces)
+        # 🔥 اعمال فیلتر حذف داپلیکیت‌ها روی هیت مپ
+        heatmap_queryset = self._remove_duplicate_posts(heatmap_queryset)
 
-        top_topics_qs = (heatmap_queryset
-                             .exclude(news_topic__isnull=True)
-                             .values('news_topic__id', 'news_topic__name')
-                             .annotate(count=Count('id'))
-                             .order_by('-count')[:10])
-
+        top_topics_qs = (
+            heatmap_queryset
+                .exclude(news_topic__isnull=True)
+                .values('news_topic__id', 'news_topic__name')
+                .annotate(count=Count('id'))
+                .order_by('-count')[:10]
+        )
         topics_categories = [topic['news_topic__name'] for topic in top_topics_qs]
         topic_ids = [topic['news_topic__id'] for topic in top_topics_qs]
 
@@ -1000,50 +1036,32 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
             }]
         }
 
-        # فعالترین برنامه‌ها - بر اساس تعداد پست
-        active_tv_programs_qs = (queryset.exclude(tv_program__isnull=True)
-                                     .values('tv_program__name')
-                                     .annotate(post_count=Count('id'))
-                                     .order_by('-post_count')[:10])
+        # فعالترین و پربازدیدترین برنامه‌های تلویزیونی
+        def serialize_tv_programs(qs, value_field, limit=10):
+            categories = []
+            data = []
+            for item in qs[:limit]:
+                categories.append(item['tv_program__name'])
+                data.append({'y': item[value_field], 'color': '#FB7979'})
+            return [{'categories': categories, 'data': data}] if categories else []
 
-        active_tv_programs = []
-        categories_programs_posts = []
-        data_programs_posts = []
-        for program in active_tv_programs_qs:
-            categories_programs_posts.append(program['tv_program__name'])
-            data_programs_posts.append({
-                'y': program['post_count'],
-                'color': '#FB7979'
-            })
+        active_tv_programs_qs = (
+            queryset.exclude(tv_program__isnull=True)
+            .values('tv_program__name')
+            .annotate(post_count=Count('id'))
+            .order_by('-post_count')
+        )
+        active_tv_programs = serialize_tv_programs(active_tv_programs_qs, 'post_count')
 
-        if categories_programs_posts and data_programs_posts:
-            active_tv_programs.append({
-                'categories': categories_programs_posts,
-                'data': data_programs_posts
-            })
+        top_viewed_tv_programs_qs = (
+            queryset.exclude(tv_program__isnull=True)
+            .values('tv_program__name')
+            .annotate(total_views=Sum('view_count'))
+            .order_by('-total_views')
+        )
+        top_viewed_tv_programs = serialize_tv_programs(top_viewed_tv_programs_qs, 'total_views')
 
-        # پربازدیدترین برنامه‌ها - بر اساس مجموع بازدید
-        top_viewed_tv_programs_qs = (queryset.exclude(tv_program__isnull=True)
-                                         .values('tv_program__name')
-                                         .annotate(total_views=Sum('view_count'))
-                                         .order_by('-total_views')[:10])
-
-        top_viewed_tv_programs = []
-        categories_programs_views = []
-        data_programs_views = []
-        for program in top_viewed_tv_programs_qs:
-            categories_programs_views.append(program['tv_program__name'])
-            data_programs_views.append({
-                'y': program['total_views'],
-                'color': '#FB7979'
-            })
-
-        if categories_programs_views and data_programs_views:
-            top_viewed_tv_programs.append({
-                'categories': categories_programs_views,
-                'data': data_programs_views
-            })
-
+        # === ساخت دیکشنری نهایی ===
         data = {
             'overall_stats': {
                 'total_posts': total_posts,
@@ -1068,6 +1086,9 @@ class AdvancedAnalyticsViewSet(viewsets.ViewSet):
             'active_tv_programs': active_tv_programs,
             'top_viewed_tv_programs': top_viewed_tv_programs,
         }
+
+        # ذخیره در کش برای 15 دقیقه
+        cache.set(cache_key, data, timeout=1 * 6)
 
         return Response(data)
 

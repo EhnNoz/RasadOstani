@@ -7,6 +7,8 @@ from django.utils import timezone
 from .models import Post, Channel, Province, UserCategory, NewsType, NewsTopic, PoliticalCategory, Platform, Profile, \
     TvProgram
 from django_filters.rest_framework import BaseInFilter, NumberFilter, CharFilter
+from django.contrib.postgres.search import SearchQuery
+import logging
 
 
 class NumberInFilter(BaseInFilter, NumberFilter):
@@ -21,13 +23,14 @@ class PostFilter(django_filters.FilterSet):
     # فیلترهای چند انتخابی با فرمت CSV
     platform = NumberInFilter(field_name='platform__id', lookup_expr='in')
     platform_names = CharInFilter(field_name='platform__name', lookup_expr='in')
-    # province = NumberInFilter(field_name='province__id', lookup_expr='in')
     province = django_filters.CharFilter(method='filter_province')
     channel = NumberInFilter(field_name='channel__id', lookup_expr='in')
 
     channel_type = django_filters.MultipleChoiceFilter(
         field_name='channel__channel_type',
-        choices=Channel.CHANNEL_TYPE_CHOICES
+        choices=Post.Channel.CHANNEL_TYPE_CHOICES if hasattr(Post, 'Channel') else []
+        # یا مستقیماً از مدل Channel ایمپورت کنید:
+        # choices=Channel.CHANNEL_TYPE_CHOICES
     )
 
     political_category = NumberInFilter(field_name='channel__political_category__id', lookup_expr='in')
@@ -55,17 +58,9 @@ class PostFilter(django_filters.FilterSet):
     end_date = django_filters.CharFilter(method='filter_end_date')
     search = django_filters.CharFilter(method='filter_search')
 
-    # فیلترهای متنی برای جستجوی جزئی
+    # فیلترهای متنی برای جستجوی جزئی (اختیاری — دیگر در جستجوی اصلی استفاده نمی‌شوند)
     username = django_filters.CharFilter(field_name='username', lookup_expr='icontains')
     channel_name = django_filters.CharFilter(field_name='channel__name_fa', lookup_expr='icontains')
-
-    def filter_province(self, queryset, name, value):
-        # اگر عدد باشد (ID)
-        if value.isdigit():
-            return queryset.filter(province__id=value)
-        # اگر رشته باشد (name_en)
-        else:
-            return queryset.filter(province__name_en__iexact=value)
 
     class Meta:
         model = Post
@@ -75,47 +70,67 @@ class PostFilter(django_filters.FilterSet):
             'sentiment', 'media_type', 'npo', 'emo', 'start_date', 'end_date', 'search'
         ]
 
+    def filter_province(self, queryset, name, value):
+        """فیلتر استان بر اساس ID یا name_en"""
+        if value.isdigit():
+            return queryset.filter(province__id=value)
+        else:
+            return queryset.filter(province__name_en__iexact=value)
+
     def filter_start_date(self, queryset, name, value):
+        """فیلتر تاریخ شروع (شمسی به میلادی)"""
         try:
-            jd = jdatetime.datetime.strptime(value, '%Y/%m/%d')
-            md = jd.togregorian()
-            return queryset.filter(datetime_create__gte=md)
-        except ValueError:
+            jd = jdatetime.strptime(value, '%Y/%m/%d')
+            gregorian_date = jd.togregorian()
+            return queryset.filter(datetime_create__gte=gregorian_date)
+        except (ValueError, TypeError):
             return queryset
 
     def filter_end_date(self, queryset, name, value):
+        """فیلتر تاریخ پایان (شمسی به میلادی)"""
         try:
-            jd = jdatetime.datetime.strptime(value, '%Y/%m/%d')
-            md = jd.togregorian()
-            md = md + timezone.timedelta(days=1)
-            return queryset.filter(datetime_create__lte=md)
-        except ValueError:
+            jd = jdatetime.strptime(value, '%Y/%m/%d')
+            gregorian_date = jd.togregorian()
+            # پایان روز
+            end_of_day = gregorian_date + timedelta(days=1)
+            return queryset.filter(datetime_create__lte=end_of_day)
+        except (ValueError, TypeError):
             return queryset
 
+    print("*///////////*")
+    logger = logging.getLogger(__name__)
+    print("***************")
+
     def filter_search(self, queryset, name, value):
-        return queryset.filter(
-            Q(username__icontains=value) |
-            Q(description__icontains=value) |
-            Q(reply_text__icontains=value) |
-            Q(extracted_hashtag__icontains=value) |
-            Q(extracted_mention__icontains=value) |
-            Q(channel__name_fa__icontains=value) |
-            Q(channel__username__icontains=value)
-        )
+        if not value or not value.strip():
+            return queryset
+
+        try:
+            # ✅ فعال‌سازی پشتیبانی از AND/OR/NOT با search_type='raw'
+            query = SearchQuery(value, search_type='raw', config='simple')
+            return queryset.filter(search_vector=query)
+        except Exception as e:
+            # در صورت خطا (مثلاً سینتکس نامعتبر)، جستجوی ساده با حالت 'plain' انجام شود
+            # logger.warning(f"Raw search failed for '{value}': {e}")
+            query = SearchQuery(value, search_type='plain', config='simple')
+            return queryset.filter(search_vector=query)
 
     @property
     def qs(self):
+        """
+        اعمال فیلتر پیش‌فرض (7 روز اخیر) اگر هیچ تاریخی داده نشده باشد
+        """
         queryset = super().qs
 
         has_start = 'start_date' in self.data
         has_end = 'end_date' in self.data
 
         if not has_start and not has_end:
+            # فیلتر پیش‌فرض: 7 روز اخیر
             seven_days_ago = timezone.now().date() - timedelta(days=7)
             queryset = queryset.filter(datetime_create__date__gte=seven_days_ago)
 
         return queryset
-
 
 class ProvinceStatsFilter(django_filters.FilterSet):
     # فیلترهای چند انتخابی با فرمت CSV
@@ -280,6 +295,7 @@ class ProfileFilter(django_filters.FilterSet):
     name = django_filters.CharFilter(lookup_expr='icontains')
     position = django_filters.CharFilter(lookup_expr='icontains')
     category = django_filters.CharFilter(lookup_expr='icontains')
+
 
     class Meta:
         model = Profile

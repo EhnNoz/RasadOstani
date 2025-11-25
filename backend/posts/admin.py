@@ -26,7 +26,7 @@ class ChannelAdmin(admin.ModelAdmin):
     list_display = [
         'name_fa', 'username', 'channel_type',
         'get_political_category', 'get_user_category',
-        'platform', 'created_at'
+        'platform', 'created_at', 'member'
     ]
     list_filter = [
         'channel_type', 'platform', 'political_category',
@@ -53,7 +53,7 @@ class ChannelAdmin(admin.ModelAdmin):
         ('اطلاعات پایه', {
             'fields': (
                 'name_fa', 'username', 'user_id', 'channel_type',
-                'platform'
+                'platform', 'member'
             )
         }),
         ('دسته‌بندی‌ها', {
@@ -127,7 +127,7 @@ class PostAdmin(admin.ModelAdmin):
         ('محتوای پست', {
             'fields': (
                 'description', 'reply_text', 'reply_username',
-                'extracted_hashtag', 'extracted_mention', 'tag'
+                'extracted_hashtag', 'extracted_mention', 'tag','search_vector'
             )
         }),
         ('آمار و ارقام', {
@@ -351,7 +351,7 @@ class AddProfileAdmin(admin.ModelAdmin):
             'fields': ('name', 'position', 'category', 'province')
         }),
         (_("دسته‌بندی‌ها"), {
-            'fields': ('photo',)
+            'fields': ('photo','platform', 'name_fa', 'username')
         }),
     )
 
