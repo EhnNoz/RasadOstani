@@ -80,7 +80,7 @@ class PostFilter(django_filters.FilterSet):
     def filter_start_date(self, queryset, name, value):
         """فیلتر تاریخ شروع (شمسی به میلادی)"""
         try:
-            jd = jdatetime.strptime(value, '%Y/%m/%d')
+            jd = jdatetime.datetime.strptime(value, '%Y/%m/%d')
             gregorian_date = jd.togregorian()
             return queryset.filter(datetime_create__gte=gregorian_date)
         except (ValueError, TypeError):
@@ -89,7 +89,7 @@ class PostFilter(django_filters.FilterSet):
     def filter_end_date(self, queryset, name, value):
         """فیلتر تاریخ پایان (شمسی به میلادی)"""
         try:
-            jd = jdatetime.strptime(value, '%Y/%m/%d')
+            jd = jdatetime.datetime.strptime(value, '%Y/%m/%d')
             gregorian_date = jd.togregorian()
             # پایان روز
             end_of_day = gregorian_date + timedelta(days=1)
